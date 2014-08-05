@@ -1,8 +1,5 @@
 package uk.co.omegaprime.thunder;
 
-import org.fusesource.lmdbjni.JNI;
-import org.fusesource.lmdbjni.Util;
-
 public class Transaction implements AutoCloseable {
     final long txn;
     boolean handleFreed = false;

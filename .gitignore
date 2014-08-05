@@ -1,2 +1,11 @@
 *.iml
 lib/
+thunder/src/main/Makefile.am
+thunder/src/main/Makefile.in
+thunder/src/main/aclocal.m4
+thunder/src/main/autotools/
+thunder/src/main/configure
+thunder/src/main/m4/
+thunder/src/main/native-package/buffer.c
+thunder/src/main/native-package/config.h.in
+thunder/src/main/vs2010.vcxproj

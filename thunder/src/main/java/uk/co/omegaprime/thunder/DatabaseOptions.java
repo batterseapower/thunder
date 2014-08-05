@@ -1,7 +1,5 @@
 package uk.co.omegaprime.thunder;
 
-import org.fusesource.lmdbjni.JNI;
-
 public class DatabaseOptions {
     int createPermissions = 0644;
     long mapSizeBytes = 10_485_760;

@@ -1,7 +1,5 @@
 package uk.co.omegaprime.thunder;
 
-import org.fusesource.lmdbjni.JNI;
-import org.fusesource.lmdbjni.Util;
 import uk.co.omegaprime.thunder.schema.Schema;
 
 import java.io.File;

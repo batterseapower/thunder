@@ -1,7 +1,5 @@
 package uk.co.omegaprime.thunder;
 
-import org.fusesource.lmdbjni.JNI;
-import org.fusesource.lmdbjni.Util;
 import sun.misc.Unsafe;
 
 import static uk.co.omegaprime.thunder.Bits.bitsToBytes;
