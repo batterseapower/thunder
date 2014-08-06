@@ -69,25 +69,6 @@ class JNI {
 
     ///////////////////////////////////////////////////////////////////////
     //
-    // Additional Helpers
-    //
-    ///////////////////////////////////////////////////////////////////////
-    public static final native void buffer_copy (
-            @JniArg(cast="const void *", flags={NO_OUT, CRITICAL}) byte[] src,
-            @JniArg(cast="size_t") long srcPos,
-            @JniArg(cast="void *") long dest,
-            @JniArg(cast="size_t") long destPos,
-            @JniArg(cast="size_t") long length);
-
-    public static final native void buffer_copy (
-            @JniArg(cast="const void *") long src,
-            @JniArg(cast="size_t") long srcPos,
-            @JniArg(cast="void *", flags={NO_IN, CRITICAL}) byte[] dest,
-            @JniArg(cast="size_t") long destPos,
-            @JniArg(cast="size_t") long length);
-
-    ///////////////////////////////////////////////////////////////////////
-    //
     // The lmdb API
     //
     ///////////////////////////////////////////////////////////////////////

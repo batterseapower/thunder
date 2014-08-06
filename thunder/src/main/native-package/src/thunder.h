@@ -58,8 +58,6 @@
 extern "C" {
 #endif
 
-void buffer_copy(const void *source, size_t source_pos, void *dest, size_t dest_pos, size_t length);
-
 #ifdef __cplusplus
 } /* extern "C" */
 #endif
