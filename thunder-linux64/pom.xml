@@ -75,7 +75,7 @@ limitations under the License.
                   <type>jar</type>
                   <overWrite>false</overWrite>
                   <outputDirectory>${project.build.directory}/lmdb</outputDirectory>
-                  <includes>META-INF/**</includes>
+                  <includes>META-INF/**/liblmdb.a,META-INF/**/lmdb.h</includes>
                 </artifactItem>
               </artifactItems>
             </configuration>
