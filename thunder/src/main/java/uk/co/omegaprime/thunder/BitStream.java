@@ -43,7 +43,9 @@ public class BitStream {
             ptr++;
             bitOffset = 0;
         }
-        unsafe.setMemory(ptr, endPtr - ptr, (byte)0);
+        if (ptr < endPtr) {
+            unsafe.setMemory(ptr, endPtr - ptr, (byte) 0);
+        }
     }
 
     // NB: can't implement remainingBits since we only get an endPtr, not an endBitOffset
