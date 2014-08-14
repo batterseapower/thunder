@@ -40,7 +40,10 @@ public class BitStream {
     public void zeroFill() {
         if (bitOffset != 0) {
             unsafe.putByte(ptr, (byte)(unsafe.getByte(ptr) & (0xFF << (8 - bitOffset))));
+            ptr++;
+            bitOffset = 0;
         }
+        unsafe.setMemory(ptr, endPtr - ptr, (byte)0);
     }
 
     // NB: can't implement remainingBits since we only get an endPtr, not an endBitOffset

@@ -107,6 +107,38 @@ public class DatabaseTest {
     }
 
     @Test
+    public void canPutWithJustAValueIntoCursor() {
+        try (final Database db = createDatabase()) {
+            try (final Transaction tx = db.transaction(false)) {
+                final Index<Integer, Integer> index = db.createIndex(tx, "Test", IntegerSchema.INSTANCE, IntegerSchema.INSTANCE);
+
+                index.put(tx, 2, 200);
+                index.put(tx, 3, 300);
+                index.put(tx, 5, 400);
+
+                try (Cursor<Integer, Integer> cursor = index.createCursor(tx)) {
+                    assertTrue(cursor.moveTo(3));
+                    assertEquals(300, cursor.getValue().intValue());
+                    cursor.put(301);
+                    assertEquals(301, cursor.getValue().intValue());
+
+                    assertTrue(cursor.movePrevious());
+                    assertTrue(cursor.moveNext());
+                    assertEquals(301, cursor.getValue().intValue());
+
+                    cursor.put(4, 400);
+                    cursor.put(401);
+                    assertEquals(401, cursor.getValue().intValue());
+
+                    assertTrue(cursor.movePrevious());
+                    assertTrue(cursor.moveNext());
+                    assertEquals(401, cursor.getValue().intValue());
+                }
+            }
+        }
+    }
+
+    @Test
     public void canRemove() {
         try (final Database db = createDatabase()) {
             try (final Transaction tx = db.transaction(false)) {
@@ -474,8 +506,8 @@ public class DatabaseTest {
         try (final Database db = createDatabase()) {
             try (final Transaction tx = db.transaction(false)) {
                 final Index<String, Integer> index = db.createIndex(tx, "Test", Schema.zipWith(StringSchema.INSTANCE, (String x) -> x.split("/", 2)[0],
-                                StringSchema.INSTANCE, (String x) -> x.split("/", 2)[1],
-                                (String x, String y) -> x + "/" + y),
+                                                                                               StringSchema.INSTANCE, (String x) -> x.split("/", 2)[1],
+                                                                                               (String x, String y) -> x + "/" + y),
                                                                                 IntegerSchema.INSTANCE);
 
                 index.put(tx, "Food/Bean", 10);

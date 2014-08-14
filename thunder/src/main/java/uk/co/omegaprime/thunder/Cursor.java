@@ -17,7 +17,7 @@ public class Cursor<K, V> implements AutoCloseable {
     // If bufferPtrStale is true then the contents of this buffer aren't actually right, and you
     // will have to call move(JNI.MDB_GET_CURRENT) to correct this situation. An alternative to
     // having the bufferPtrStale flag would be to just call this eagerly whenever the buffer goes
-    // stale, but I kind of like the idea of avoiding the JNI call (though TBH it doesn't seem to
+    // stale, but I kind of like the idea of avoiding the JNI call (though TBH it doesn't seem to matter)
     final long bufferPtr;
     boolean bufferPtrStale;
 
