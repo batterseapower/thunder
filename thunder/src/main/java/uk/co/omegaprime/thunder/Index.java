@@ -61,6 +61,15 @@ public class Index<K, V> implements AutoCloseable {
         }
     }
 
+    protected static long allocateAndCopyBufferPointer(long bufferPtr, long bufferPtrToCopy) {
+        int sz = (int)unsafe.getAddress(bufferPtrToCopy);
+        long bufferPtrNow = Index.allocateBufferPointer(bufferPtr, sz);
+        unsafe.putAddress(bufferPtrNow,                       sz);
+        unsafe.putAddress(bufferPtrNow + Unsafe.ADDRESS_SIZE, bufferPtr + 2 * Unsafe.ADDRESS_SIZE);
+        unsafe.copyMemory(unsafe.getAddress(bufferPtrToCopy + Unsafe.ADDRESS_SIZE), bufferPtr + 2 * Unsafe.ADDRESS_SIZE, sz);
+        return bufferPtrNow;
+    }
+
     protected static void freeBufferPointer(long bufferPtr, long bufferPtrNow) {
         if (bufferPtr == 0) {
             unsafe.freeMemory(bufferPtrNow);

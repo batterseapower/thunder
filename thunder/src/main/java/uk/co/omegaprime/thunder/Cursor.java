@@ -123,13 +123,22 @@ public class Cursor<K, V> implements AutoCloseable {
 
         final int vSz = bitsToBytes(index.vSchema.sizeBits(v));
 
-        unsafe.putAddress(bufferPtr + 2 * Unsafe.ADDRESS_SIZE, vSz);
-        Util.checkErrorCode(JNI.mdb_cursor_put(cursor, bufferPtr, bufferPtr + 2 * Unsafe.ADDRESS_SIZE, JNI.MDB_CURRENT | JNI.MDB_RESERVE));
-        index.bs.initialize(unsafe.getAddress(bufferPtr + 3 * Unsafe.ADDRESS_SIZE), vSz);
-        index.vSchema.write(index.bs, v);
-        index.bs.zeroFill();
-
-        bufferPtrStale = false;
+        // You might think we could just reuse the existing key in bufferPtr (that we know to be correct).
+        // Unfortunately we have to copy the key into a fresh buffer and give that to mdb_cursor_put instead.
+        // Reason: the pointers in bufferPtr generally come from mdb_get, and as the docs state "Values returned
+        // from the database are valid only until a subsequent update operation, or the end of the transaction".
+        // In particular I found that trying to use them as an *input* to an update operation causes DB corruption.
+        final long kBufferPtrNow = Index.allocateAndCopyBufferPointer(index.kBufferPtr, bufferPtr);
+        try {
+            unsafe.putAddress(bufferPtr + 2 * Unsafe.ADDRESS_SIZE, vSz);
+            Util.checkErrorCode(JNI.mdb_cursor_put(cursor, kBufferPtrNow, bufferPtr + 2 * Unsafe.ADDRESS_SIZE, JNI.MDB_CURRENT | JNI.MDB_RESERVE));
+            index.bs.initialize(unsafe.getAddress(bufferPtr + 3 * Unsafe.ADDRESS_SIZE), vSz);
+            index.vSchema.write(index.bs, v);
+            index.bs.zeroFill();
+        } finally {
+            Index.freeBufferPointer(index.kBufferPtr, kBufferPtrNow);
+            bufferPtrStale = true;
+        }
     }
 
     // This method has a lot in common with Index.put. LMDB actually just implements mdb_put using mdb_cursor_put, so this makes sense!

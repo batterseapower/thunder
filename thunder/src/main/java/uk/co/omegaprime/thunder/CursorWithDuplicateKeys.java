@@ -107,12 +107,16 @@ public class CursorWithDuplicateKeys<K, V> extends Cursor<K, V> {
 
         final int vSz = bitsToBytes(index.vSchema.sizeBits(v));
 
+        // See the comment in Cursor.put that explains why we have to "needlessly" copy the key from
+        // bufferPtr into a fresh buffer for the call to mdb_cursor_put.
+        final long kBufferPtrNow = Index.allocateAndCopyBufferPointer(index.kBufferPtr, bufferPtr);
         final long vBufferPtrNow = Index.allocateBufferPointer(index.vBufferPtr, vSz);
         index.fillBufferPointerFromSchema(index.vSchema, vBufferPtrNow, vSz, v);
         try {
-            Util.checkErrorCode(JNI.mdb_cursor_put(cursor, bufferPtr, vBufferPtrNow, 0));
+            Util.checkErrorCode(JNI.mdb_cursor_put(cursor, kBufferPtrNow, vBufferPtrNow, 0));
         } finally {
             Index.freeBufferPointer(index.vBufferPtr, vBufferPtrNow);
+            Index.freeBufferPointer(index.kBufferPtr, kBufferPtrNow);
             bufferPtrStale = true;
         }
     }
