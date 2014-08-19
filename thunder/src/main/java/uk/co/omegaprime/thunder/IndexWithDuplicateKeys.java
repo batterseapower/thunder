@@ -14,7 +14,7 @@ public class IndexWithDuplicateKeys<K, V> extends Index<K, V> {
     public CursorWithDuplicateKeys<K, V> createCursor(Transaction tx) {
         final long[] cursorPtr = new long[1];
         Util.checkErrorCode(JNI.mdb_cursor_open(tx.txn, dbi, cursorPtr));
-        return new CursorWithDuplicateKeys<>(this, cursorPtr[0]);
+        return new CursorWithDuplicateKeys<>(this, tx, cursorPtr[0]);
     }
 
     // Override the base class because MDB_RESERVE doesn't really make sense with MDB_DUPSORT
@@ -32,6 +32,7 @@ public class IndexWithDuplicateKeys<K, V> extends Index<K, V> {
         } finally {
             freeBufferPointer(vBufferPtr, vBufferPtrNow);
             freeBufferPointer(kBufferPtr, kBufferPtrNow);
+            tx.generation++;
         }
     }
 
@@ -56,6 +57,7 @@ public class IndexWithDuplicateKeys<K, V> extends Index<K, V> {
         } finally {
             freeBufferPointer(vBufferPtr, vBufferPtrNow);
             freeBufferPointer(kBufferPtr, kBufferPtrNow);
+            tx.generation++;
         }
     }
 
@@ -78,6 +80,7 @@ public class IndexWithDuplicateKeys<K, V> extends Index<K, V> {
         } finally {
             freeBufferPointer(vBufferPtr, vBufferPtrNow);
             freeBufferPointer(kBufferPtr, kBufferPtrNow);
+            tx.generation++;
         }
     }
 

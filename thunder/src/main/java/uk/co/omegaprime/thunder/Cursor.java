@@ -11,23 +11,27 @@ import static uk.co.omegaprime.thunder.Bits.unsafe;
 // XXX: type specialisation for true 0-allocation? But we might hope that escape analysis would save us because our boxes are intermediate only.
 public class Cursor<K, V> implements AutoCloseable {
     final Index<K, V> index;
+    final Transaction tx;
     final long cursor;
 
     // Unlike the bufferPtrs in Index, it is important the the state of this var persists across calls:
     // it basically holds info about what the cursor is currently pointing to.
     //
-    // If bufferPtrStale is true then the contents of this buffer aren't actually right, and you
-    // will have to call move(JNI.MDB_GET_CURRENT) to correct this situation. An alternative to
-    // having the bufferPtrStale flag would be to just call this eagerly whenever the buffer goes
-    // stale, but I kind of like the idea of avoiding the JNI call (though TBH it doesn't seem to matter)
+    // If bufferPtrGeneration is different from the current transaction generation then the contents of this buffer
+    // aren't actually guaranteed to be right, and you will have to call move(JNI.MDB_GET_CURRENT) to correct
+    // this situation. We could avoid this ever happening in many cases by just call this eagerly after any
+    // operation (e.g. a put) that leaves the bufferPtr stale, but because *other* cursors can invalidate
+    // bufferPtr as a side effect of their own updates this is a actually bit tricky to guarantee.
     final long bufferPtr;
-    boolean bufferPtrStale;
+    long bufferPtrGeneration;
 
-    public Cursor(Index<K, V> index, long cursor) {
+    public Cursor(Index<K, V> index, Transaction tx, long cursor) {
         this.index = index;
+        this.tx = tx;
         this.cursor = cursor;
 
         this.bufferPtr = unsafe.allocateMemory(4 * Unsafe.ADDRESS_SIZE);
+        this.bufferPtrGeneration = tx.generation - 1;
     }
 
     protected boolean isFound(int rc) {
@@ -41,7 +45,7 @@ public class Cursor<K, V> implements AutoCloseable {
 
     protected boolean move(int op) {
         boolean result = isFound(JNI.mdb_cursor_get(cursor, bufferPtr, bufferPtr + 2 * Unsafe.ADDRESS_SIZE, op));
-        bufferPtrStale = false;
+        bufferPtrGeneration = tx.generation;
         return result;
     }
 
@@ -50,7 +54,7 @@ public class Cursor<K, V> implements AutoCloseable {
     public boolean moveNext()     { return move(JNI.MDB_NEXT); }
     public boolean movePrevious() { return move(JNI.MDB_PREV); }
 
-    protected boolean refresh() { return move(JNI.MDB_GET_CURRENT); }
+    protected boolean refreshBufferPtr() { return bufferPtrGeneration == tx.generation || move(JNI.MDB_GET_CURRENT); }
 
     private boolean move(K k, int op) {
         final int kSz = bitsToBytes(index.kSchema.sizeBits(k));
@@ -63,7 +67,7 @@ public class Cursor<K, V> implements AutoCloseable {
             // Need to copy the MDB_val from the temp structure to the permanent one, in case someone does getKey() now (they should get back k)
             unsafe.putAddress(bufferPtr,                       unsafe.getAddress(kBufferPtrNow));
             unsafe.putAddress(bufferPtr + Unsafe.ADDRESS_SIZE, unsafe.getAddress(kBufferPtrNow + Unsafe.ADDRESS_SIZE));
-            bufferPtrStale = false;
+            bufferPtrGeneration = tx.generation;
             Index.freeBufferPointer(index.kBufferPtr, kBufferPtrNow);
         }
     }
@@ -84,7 +88,7 @@ public class Cursor<K, V> implements AutoCloseable {
     }
 
     private <T> boolean keyValueEquals(T kv, int byteOffsetFromBufferPtr, Schema<T> schema, long scratchBufferPtr) {
-        if (bufferPtrStale) { refresh(); }
+        refreshBufferPtr();
 
         final int sz = bitsToBytes(schema.sizeBits(kv));
         if (sz != unsafe.getAddress(bufferPtr + byteOffsetFromBufferPtr)) {
@@ -109,19 +113,19 @@ public class Cursor<K, V> implements AutoCloseable {
     }
 
     public K getKey() {
-        if (bufferPtrStale) { refresh(); }
+        refreshBufferPtr();
         index.bs.initialize(unsafe.getAddress(bufferPtr + Unsafe.ADDRESS_SIZE), (int)unsafe.getAddress(bufferPtr));
         return index.kSchema.read(index.bs);
     }
 
     public V getValue() {
-        if (bufferPtrStale) { refresh(); }
+        refreshBufferPtr();
         index.bs.initialize(unsafe.getAddress(bufferPtr + 3 * Unsafe.ADDRESS_SIZE), (int)unsafe.getAddress(bufferPtr + 2 * Unsafe.ADDRESS_SIZE));
         return index.vSchema.read(index.bs);
     }
 
     public void put(V v) {
-        if (bufferPtrStale) { refresh(); }
+        refreshBufferPtr();
 
         final int vSz = bitsToBytes(index.vSchema.sizeBits(v));
 
@@ -139,7 +143,7 @@ public class Cursor<K, V> implements AutoCloseable {
             index.bs.zeroFill();
         } finally {
             Index.freeBufferPointer(index.kBufferPtr, kBufferPtrNow);
-            bufferPtrStale = true;
+            tx.generation++;
         }
     }
 
@@ -160,7 +164,7 @@ public class Cursor<K, V> implements AutoCloseable {
         } finally {
             Index.freeBufferPointer(index.vBufferPtr, vBufferPtrNow);
             Index.freeBufferPointer(index.kBufferPtr, kBufferPtrNow);
-            bufferPtrStale = true;
+            tx.generation++;
         }
     }
 
@@ -187,13 +191,13 @@ public class Cursor<K, V> implements AutoCloseable {
         } finally {
             Index.freeBufferPointer(index.vBufferPtr, vBufferPtrNow);
             Index.freeBufferPointer(index.kBufferPtr, kBufferPtrNow);
-            bufferPtrStale = true;
+            tx.generation++;
         }
     }
 
     public void delete() {
         Util.checkErrorCode(JNI.mdb_cursor_del(cursor, 0));
-        bufferPtrStale = true;
+        tx.generation++;
     }
 
     public void close() {

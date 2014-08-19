@@ -6,8 +6,8 @@ import static uk.co.omegaprime.thunder.Bits.bitsToBytes;
 import static uk.co.omegaprime.thunder.Bits.unsafe;
 
 public class CursorWithDuplicateKeys<K, V> extends Cursor<K, V> {
-    public CursorWithDuplicateKeys(IndexWithDuplicateKeys<K, V> index, long cursor) {
-        super(index, cursor);
+    public CursorWithDuplicateKeys(IndexWithDuplicateKeys<K, V> index, Transaction tx, long cursor) {
+        super(index, tx, cursor);
     }
 
     public boolean moveFirstOfKey()        { return move(JNI.MDB_FIRST_DUP); }
@@ -50,8 +50,8 @@ public class CursorWithDuplicateKeys<K, V> extends Cursor<K, V> {
             unsafe.putAddress(bufferPtr +     Unsafe.ADDRESS_SIZE, unsafe.getAddress(kBufferPtrNow + Unsafe.ADDRESS_SIZE));
             unsafe.putAddress(bufferPtr + 2 * Unsafe.ADDRESS_SIZE, unsafe.getAddress(vBufferPtrNow));
             unsafe.putAddress(bufferPtr + 3 * Unsafe.ADDRESS_SIZE, unsafe.getAddress(vBufferPtrNow + Unsafe.ADDRESS_SIZE));
-            bufferPtrStale = false;
             Index.freeBufferPointer(index.kBufferPtr, kBufferPtrNow);
+            bufferPtrGeneration = tx.generation;
         }
     }
 
@@ -70,7 +70,7 @@ public class CursorWithDuplicateKeys<K, V> extends Cursor<K, V> {
         } finally {
             Index.freeBufferPointer(index.vBufferPtr, vBufferPtrNow);
             Index.freeBufferPointer(index.kBufferPtr, kBufferPtrNow);
-            bufferPtrStale = true;
+            tx.generation++;
         }
     }
 
@@ -95,7 +95,7 @@ public class CursorWithDuplicateKeys<K, V> extends Cursor<K, V> {
         } finally {
             Index.freeBufferPointer(index.vBufferPtr, vBufferPtrNow);
             Index.freeBufferPointer(index.kBufferPtr, kBufferPtrNow);
-            bufferPtrStale = true;
+            tx.generation++;
         }
     }
 
@@ -103,7 +103,7 @@ public class CursorWithDuplicateKeys<K, V> extends Cursor<K, V> {
     // Furthermore, MDB_CURRENT isn't actually useful for anything when using MDB_DUPSORT!
     @Override
     public void put(V v) {
-        if (bufferPtrStale) { refresh(); }
+        refreshBufferPtr();
 
         final int vSz = bitsToBytes(index.vSchema.sizeBits(v));
 
@@ -117,12 +117,12 @@ public class CursorWithDuplicateKeys<K, V> extends Cursor<K, V> {
         } finally {
             Index.freeBufferPointer(index.vBufferPtr, vBufferPtrNow);
             Index.freeBufferPointer(index.kBufferPtr, kBufferPtrNow);
-            bufferPtrStale = true;
+            tx.generation++;
         }
     }
 
     public void deleteAllOfKey() {
         Util.checkErrorCode(JNI.mdb_cursor_del(cursor, JNI.MDB_NODUPDATA));
-        bufferPtrStale = true;
+        tx.generation++;
     }
 }

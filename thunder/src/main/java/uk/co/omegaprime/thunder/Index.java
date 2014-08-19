@@ -79,7 +79,7 @@ public class Index<K, V> implements AutoCloseable {
     public Cursor<K, V> createCursor(Transaction tx) {
         final long[] cursorPtr = new long[1];
         Util.checkErrorCode(JNI.mdb_cursor_open(tx.txn, dbi, cursorPtr));
-        return new Cursor<>(this, cursorPtr[0]);
+        return new Cursor<>(this, tx, cursorPtr[0]);
     }
 
     public void close() {
@@ -105,6 +105,7 @@ public class Index<K, V> implements AutoCloseable {
         } finally {
             freeBufferPointer(vBufferPtr, vBufferPtrNow);
             freeBufferPointer(kBufferPtr, kBufferPtrNow);
+            tx.generation++;
         }
     }
 
@@ -132,6 +133,7 @@ public class Index<K, V> implements AutoCloseable {
         } finally {
             freeBufferPointer(vBufferPtr, vBufferPtrNow);
             freeBufferPointer(kBufferPtr, kBufferPtrNow);
+            tx.generation++;
         }
     }
 
@@ -150,6 +152,7 @@ public class Index<K, V> implements AutoCloseable {
             }
         } finally {
             freeBufferPointer(kBufferPtr, kBufferPtrNow);
+            tx.generation++;
         }
     }
 
