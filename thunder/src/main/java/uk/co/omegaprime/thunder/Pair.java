@@ -3,8 +3,8 @@ package uk.co.omegaprime.thunder;
 import java.util.Objects;
 
 public final class Pair<K, V> {
-    final K k;
-    final V v;
+    public final K k;
+    public final V v;
 
     public Pair(K k, V v) {
         this.k = k;

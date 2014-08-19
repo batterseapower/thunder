@@ -6,6 +6,8 @@ import uk.co.omegaprime.thunder.schema.Schema;
 import static uk.co.omegaprime.thunder.Bits.bitsToBytes;
 import static uk.co.omegaprime.thunder.Bits.unsafe;
 
+// FIXME: bufferPtr may be invalidated by an operation on *another* cursor/index within the same transaction
+
 // XXX: type specialisation for true 0-allocation? But we might hope that escape analysis would save us because our boxes are intermediate only.
 public class Cursor<K, V> implements AutoCloseable {
     final Index<K, V> index;
@@ -48,7 +50,7 @@ public class Cursor<K, V> implements AutoCloseable {
     public boolean moveNext()     { return move(JNI.MDB_NEXT); }
     public boolean movePrevious() { return move(JNI.MDB_PREV); }
 
-    boolean refresh() { return move(JNI.MDB_GET_CURRENT); }
+    protected boolean refresh() { return move(JNI.MDB_GET_CURRENT); }
 
     private boolean move(K k, int op) {
         final int kSz = bitsToBytes(index.kSchema.sizeBits(k));

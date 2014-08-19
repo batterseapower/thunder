@@ -1,7 +1,9 @@
 package uk.co.omegaprime.thunder.schema;
 
 import uk.co.omegaprime.thunder.BitStream;
+import uk.co.omegaprime.thunder.Pair;
 
+import java.util.Optional;
 import java.util.function.BiFunction;
 import java.util.function.Function;
 
@@ -31,14 +33,24 @@ public interface Schema<T> {
         };
     }
 
+    public static <T, U> Schema<Pair<T, U>> zip(Schema<T> leftSchema, Schema<U> rightSchema) {
+        return zipWith(leftSchema,  (Pair<T, U> pair) -> pair.k,
+                       rightSchema, (Pair<T, U> pair) -> pair.v,
+                       Pair::new);
+    }
+
     public static <T> Schema<T> nullable(Schema<T> schema) {
-        return new Schema<T>() {
+        return optional(schema).map(Optional::ofNullable, (Optional<T> optional) -> optional.isPresent() ? optional.get() : null);
+    }
+
+    public static <T> Schema<Optional<T>> optional(Schema<T> schema) {
+        return new Schema<Optional<T>>() {
             @Override
-            public T read(BitStream bs) {
+            public Optional<T> read(BitStream bs) {
                 if (!bs.getBoolean()) {
-                    return null;
+                    return Optional.empty();
                 } else {
-                    return schema.read(bs);
+                    return Optional.of(schema.read(bs));
                 }
             }
 
@@ -48,17 +60,17 @@ public interface Schema<T> {
             }
 
             @Override
-            public int sizeBits(T x) {
-                return 1 + (x == null ? 0 : schema.sizeBits(x));
+            public int sizeBits(Optional<T> x) {
+                return 1 + (x.isPresent() ? schema.sizeBits(x.get()) : 0);
             }
 
             @Override
-            public void write(BitStream bs, T x) {
-                if (x == null) {
+            public void write(BitStream bs, Optional<T> x) {
+                if (!x.isPresent()) {
                     bs.putBoolean(false);
                 } else {
                     bs.putBoolean(true);
-                    schema.write(bs, x);
+                    schema.write(bs, x.get());
                 }
             }
         };
