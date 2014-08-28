@@ -21,9 +21,9 @@ public class Cursor<K, V> implements Cursorlike<K,V>, AutoCloseable {
     // operation (e.g. a put) that leaves the bufferPtr stale, but because *other* cursors can invalidate
     // bufferPtr as a side effect of their own updates this is a actually bit tricky to guarantee.
     static class Buffer {
-        // XXX: could inline this back into Cursor. I used to share it between Cursor instances but decided against it.
         final long bufferPtr = unsafe.allocateMemory(4 * Unsafe.ADDRESS_SIZE);
         long bufferPtrGeneration;
+        long references = 0;
 
         public Buffer(Transaction tx) {
             this.bufferPtrGeneration = tx.generation - 1;
@@ -41,6 +41,8 @@ public class Cursor<K, V> implements Cursorlike<K,V>, AutoCloseable {
         this.tx = tx;
         this.cursor = cursor;
         this.buffer = buffer;
+
+        buffer.references++;
     }
 
     protected boolean isFound(int rc) {
@@ -232,136 +234,17 @@ public class Cursor<K, V> implements Cursorlike<K,V>, AutoCloseable {
     }
 
     public void close() {
-        unsafe.freeMemory(buffer.bufferPtr);
-        JNI.mdb_cursor_close(cursor);
+        if (--buffer.references == 0) {
+            unsafe.freeMemory(buffer.bufferPtr);
+            JNI.mdb_cursor_close(cursor);
+        }
     }
 
     public <K2, V2> Cursor<K2, V2> reinterpretView(Schema<K2> k2Schema, Schema<V2> v2Schema) {
-        // FIXME: ref count? Or ensure that returned thing can't be closed.
-        return new Cursor<K2, V2>(index.reinterpretView(k2Schema, v2Schema), tx, cursor, buffer);
+        // It is because of this that we need to ref count the buffer
+        return new Cursor<>(index.reinterpretView(k2Schema, v2Schema), tx, cursor, buffer);
     }
 
-    public Schema<K> getKeySchema()   { return index.getKeySchema(); }
-    public Schema<V> getValueSchema() { return index.getValueSchema(); }
-
-    // FIXME: only allow this to be used if the current key schema is a pair schema?
-    // FIXME: version for cursors with duplicate keys?
-    public <A, B> Cursorlike<B, V> subcursorView(Schema<A> aSchema, Schema<B> bSchema, final A a) {
-        final Schema<A> aSuccSchema = new Schema<A>() {
-            @Override
-            public A read(BitStream bs) {
-                throw new IllegalStateException("aSuccSchema.read");
-            }
-
-            @Override
-            public int maximumSizeBits() {
-                return aSchema.maximumSizeBits();
-            }
-
-            @Override
-            public int sizeBits(A a) {
-                return aSchema.sizeBits(a);
-            }
-
-            @Override
-            public void write(BitStream bs, A a) {
-                long mark = bs.mark();
-                aSchema.write(bs, a);
-                bs.incrementBitStreamFromMark(mark);
-            }
-        };
-
-        // Bit of a hack here unfortunately...
-        final boolean aIsMaximum;
-        {
-            final int aSz = bitsToBytes(aSchema.sizeBits(a));
-            final long aBufferPtrNow = Index.allocateBufferPointer(index.kBufferPtr, aSz);
-            try {
-                index.bs.initialize(aBufferPtrNow + 2 * Unsafe.ADDRESS_SIZE, aSz);
-                final long mark = index.bs.mark();
-                aSchema.write(index.bs, a);
-                aIsMaximum = index.bs.incrementBitStreamFromMark(mark);
-            } finally {
-                Index.freeBufferPointer(index.kBufferPtr, aBufferPtrNow);
-            }
-        }
-
-        // NB: it is for this purpose that seekView.keyEquals carefully does *not* compare the trailing bits of the
-        // key/value as well -- for aSeekView those trailing bits would be the first bits of "b" so may be non-zero
-        final Cursor<A, V>          aSeekView     = this.reinterpretView(aSchema, getValueSchema());
-        final Cursor<A, V>          aSuccSeekView = this.reinterpretView(aSuccSchema, getValueSchema());
-        final Cursor<Pair<A, B>, V> abSeekView    = this.reinterpretView(Schema.zip(aSchema, bSchema), getValueSchema());
-        return new Cursorlike<B, V>() {
-            @Override
-            public boolean moveFirst() {
-                return aSeekView.moveCeiling(a) && aSeekView.keyStartsWith(a);
-            }
-
-            @Override
-            public boolean moveLast() {
-                return (!aIsMaximum && aSuccSeekView.moveCeiling(a) ? aSeekView.movePrevious() : aSeekView.moveLast()) && aSeekView.keyStartsWith(a);
-            }
-
-            @Override
-            public boolean moveNext() {
-                return aSeekView.moveNext() && aSeekView.keyStartsWith(a);
-            }
-
-            @Override
-            public boolean movePrevious() {
-                return aSeekView.movePrevious() && aSeekView.keyStartsWith(a);
-            }
-
-            @Override
-            public boolean moveTo(B b) {
-                return abSeekView.moveTo(new Pair<>(a, b));
-            }
-
-            @Override
-            public boolean moveCeiling(B b) {
-                return abSeekView.moveCeiling(new Pair<>(a, b)) && aSeekView.keyStartsWith(a);
-            }
-
-            @Override
-            public boolean moveFloor(B b) {
-                return abSeekView.moveFloor(new Pair<>(a, b)) && aSeekView.keyStartsWith(a);
-            }
-
-            @Override
-            public B getKey() {
-                return abSeekView.getKey().v;
-            }
-
-            @Override
-            public V getValue() {
-                return abSeekView.getValue();
-            }
-
-            @Override
-            public void put(V v) {
-                abSeekView.put(v);
-            }
-
-            @Override
-            public void put(B b, V v) {
-                abSeekView.put(new Pair<>(a, b), v);
-            }
-
-            @Override
-            public V putIfAbsent(B b, V v) {
-                return abSeekView.putIfAbsent(new Pair<>(a, b), v);
-            }
-
-            @Override
-            public void delete() {
-                abSeekView.delete();
-            }
-
-            public <C, D> Cursorlike<D, V> subcursorView(Schema<C> cSchema, Schema<D> dSchema, final C c) {
-                // B == C + D
-                // K == A + B == A + C + D
-                return Cursor.this.<Pair<A, C>, D>subcursorView(Schema.zip(aSchema, cSchema), dSchema, new Pair<A, C>(a, c));
-            }
-        };
-    }
+    @Override public Schema<K> getKeySchema()   { return index.getKeySchema(); }
+    @Override public Schema<V> getValueSchema() { return index.getValueSchema(); }
 }

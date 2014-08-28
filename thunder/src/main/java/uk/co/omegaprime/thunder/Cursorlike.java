@@ -1,5 +1,7 @@
 package uk.co.omegaprime.thunder;
 
+import uk.co.omegaprime.thunder.schema.Schema;
+
 public interface Cursorlike<K, V> {
     boolean moveFirst();
 
@@ -26,4 +28,7 @@ public interface Cursorlike<K, V> {
     V putIfAbsent(K k, V v);
 
     void delete();
+
+    Schema<K> getKeySchema();
+    Schema<V> getValueSchema();
 }

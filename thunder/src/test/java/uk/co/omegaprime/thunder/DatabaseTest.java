@@ -886,7 +886,7 @@ public class DatabaseTest {
 
                 try (final Cursor<Pair<Integer, Integer>, String> cursor = index.createCursor(tx)) {
                     for (int a : new int[] { 0, 100, 0xFFFFFFFF }) {
-                        final Cursorlike<Integer, String> subcursor = cursor.subcursorView(UnsignedIntegerSchema.INSTANCE, UnsignedIntegerSchema.INSTANCE, a);
+                        final Cursorlike<Integer, String> subcursor = new SubcursorView<>(cursor, UnsignedIntegerSchema.INSTANCE, UnsignedIntegerSchema.INSTANCE, a);
 
                         assertTrue(subcursor.moveFirst());
                         assertEquals(0, subcursor.getKey().intValue());
@@ -914,7 +914,7 @@ public class DatabaseTest {
                     }
 
                     {
-                        final Cursorlike<Integer, String> subcursor = cursor.subcursorView(UnsignedIntegerSchema.INSTANCE, UnsignedIntegerSchema.INSTANCE, 1337);
+                        final Cursorlike<Integer, String> subcursor = new SubcursorView<>(cursor, UnsignedIntegerSchema.INSTANCE, UnsignedIntegerSchema.INSTANCE, 1337);
                         assertFalse(subcursor.moveFirst());
                         assertFalse(subcursor.moveLast());
                         assertFalse(subcursor.moveTo(100));
@@ -923,7 +923,7 @@ public class DatabaseTest {
                     }
 
                     {
-                        final Cursorlike<Integer, String> subcursor = cursor.subcursorView(UnsignedIntegerSchema.INSTANCE, UnsignedIntegerSchema.INSTANCE, 200);
+                        final Cursorlike<Integer, String> subcursor = new SubcursorView<>(cursor, UnsignedIntegerSchema.INSTANCE, UnsignedIntegerSchema.INSTANCE, 200);
                         assertTrue(subcursor.moveFirst());
                         assertEquals(100, subcursor.getKey().intValue());
                         assertFalse(subcursor.moveNext());
