@@ -29,6 +29,60 @@ public class BitStream {
         ptr = mark & ~0xE000000000000000l;
     }
 
+    private static byte lsbMask(byte bitOffset) {
+        // bitOffset == 1 ==> mask == (1 << 7) - 1 == 10000000b - 1 == 01111111b
+        return (byte)((1 << (8 - bitOffset)) - 1);
+    }
+
+    public boolean incrementBitStreamFromMark(long mark) {
+        byte markBitOffset = (byte)(mark >>> 61);
+        long markPtr = mark & ~0xE000000000000000l;
+
+        if (bitOffset != 0) {
+            // Increment bitOffset leading bits from ptr only
+            final byte unincremented = unsafe.getByte(ptr);
+            final byte incremented = (byte)(((unincremented >> (8 - bitOffset)) + 1) << (8 - bitOffset));
+            if (markBitOffset != 0 && markPtr == ptr) {
+                final byte mask = lsbMask(markBitOffset);
+                unsafe.putByte(ptr, (byte)((mask & incremented) | (unincremented & ~mask)));
+                if ((mask & incremented) != 0) {
+                    // No overflow from this sub-byte range
+                    return false;
+                }
+            } else {
+                unsafe.putByte(ptr, incremented);
+                if (incremented != 0) {
+                    // No overflow from these last few bits
+                    return false;
+                }
+            }
+        }
+
+        for (long ptr = this.ptr - 1; ptr >= (markBitOffset == 0 ? markPtr : markPtr + 1); ptr--) {
+            final byte incremented = (byte)(unsafe.getByte(ptr) + 1);
+            unsafe.putByte(ptr, incremented);
+            if (incremented != 0) {
+                // No overflow from this intermediate byte
+                return false;
+            }
+        }
+
+        if (markBitOffset != 0 && markPtr != ptr) {
+            // Increment (8 - markBitOffset) trailing bits in markPtr
+            final byte unincremented = unsafe.getByte(markPtr);
+            final byte mask = lsbMask(markBitOffset);
+            final int incremented = (unincremented & mask) + 1;
+            unsafe.putByte(markPtr, (byte)(incremented | (unincremented & ~mask)));
+            if ((incremented & (1 << (8 - markBitOffset))) == 0) {
+                // No overflow from these first few bits
+                return false;
+            }
+        }
+
+        // Overflow has occurred!
+        return true;
+    }
+
     public void initialize(long ptr, int sz) {
         this.ptr = ptr;
         this.endPtr = ptr + sz;
@@ -86,14 +140,14 @@ public class BitStream {
     public void putBoolean(boolean x) {
         byte current = unsafe.getByte(ptr);
         int mask = 1 << (7 - bitOffset);
-        unsafe.putByte(ptr, (byte)(x ? current | mask : current & ~mask));
+        unsafe.putByte(ptr, (byte) (x ? current | mask : current & ~mask));
         advanceBits(1);
     }
 
     public void putByte(byte x) {
         final int mask = 0xFF << (8 - bitOffset);
         int cleared = bigEndian(unsafe.getShort(ptr)) & ~mask;
-        unsafe.putShort(ptr, bigEndian((short)(cleared | (x << (8 - bitOffset)))));
+        unsafe.putShort(ptr, bigEndian((short) (cleared | (x << (8 - bitOffset)))));
         advance(1);
     }
 

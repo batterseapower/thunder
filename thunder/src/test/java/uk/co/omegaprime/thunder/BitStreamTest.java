@@ -56,4 +56,112 @@ public class BitStreamTest {
 
         Bits.unsafe.freeMemory(ptr);
     }
+
+    @Test
+    public void testIncrementBitStreamFromMarkByteBoundaryNoOverflow() {
+        final long ptr = Bits.unsafe.allocateMemory(32);
+
+        {
+            final BitStream bs = new BitStream(ptr, 32);
+            bs.putInt(100);
+            final long mark0 = bs.mark();
+            bs.putInt(200);
+            bs.putInt(300);
+            assertFalse(bs.incrementBitStreamFromMark(mark0));
+            final long mark1 = bs.mark();
+            bs.putInt(0xFFF);
+            assertFalse(bs.incrementBitStreamFromMark(mark1));
+        }
+
+        {
+            final BitStream bs = new BitStream(ptr, 32);
+            assertEquals(100, bs.getInt());
+            assertEquals(200, bs.getInt());
+            assertEquals(301, bs.getInt());
+            assertEquals(0x1000, bs.getInt());
+        }
+
+        Bits.unsafe.freeMemory(ptr);
+    }
+
+    @Test
+    public void testIncrementBitStreamFromMarkByteBoundaryOverflow() {
+        final long ptr = Bits.unsafe.allocateMemory(32);
+
+        {
+            final BitStream bs = new BitStream(ptr, 32);
+            bs.putInt(100);
+            final long mark = bs.mark();
+            bs.putInt(0xFFFFFFFF);
+            bs.putInt(0xFFFFFFFF);
+            assertTrue(bs.incrementBitStreamFromMark(mark));
+        }
+
+        {
+            final BitStream bs = new BitStream(ptr, 32);
+            assertEquals(100, bs.getInt());
+            assertEquals(0, bs.getInt());
+            assertEquals(0, bs.getInt());
+        }
+
+        Bits.unsafe.freeMemory(ptr);
+    }
+
+    @Test
+    public void testIncrementBitStreamFromMarkSubByteBits() {
+        final long ptr = Bits.unsafe.allocateMemory(32);
+
+        {
+            final BitStream bs = new BitStream(ptr, 32);
+            bs.putBoolean(true);
+            final long mark0 = bs.mark();
+            bs.putBoolean(false);
+            bs.putBoolean(false);
+            bs.putBoolean(true);
+            assertFalse(bs.incrementBitStreamFromMark(mark0));
+            final long mark1 = bs.mark();
+            bs.putBoolean(true);
+            bs.putBoolean(true);
+            bs.putBoolean(true);
+            assertTrue(bs.incrementBitStreamFromMark(mark1));
+        }
+
+        {
+            final BitStream bs = new BitStream(ptr, 32);
+            assertTrue(bs.getBoolean());
+            assertFalse(bs.getBoolean());
+            assertTrue(bs.getBoolean());
+            assertFalse(bs.getBoolean());
+            assertFalse(bs.getBoolean());
+            assertFalse(bs.getBoolean());
+            assertFalse(bs.getBoolean());
+        }
+
+        Bits.unsafe.freeMemory(ptr);
+    }
+
+    @Test
+    public void testIncrementBitStreamFromMarkMultiByteBits() {
+        final long ptr = Bits.unsafe.allocateMemory(32);
+
+        {
+            final BitStream bs = new BitStream(ptr, 32);
+            bs.putBoolean(true);
+            final long mark0 = bs.mark();
+            bs.putInt(100);
+            assertFalse(bs.incrementBitStreamFromMark(mark0));
+            final long mark1 = bs.mark();
+            bs.putInt(0xFFFFFFFF);
+            assertTrue(bs.incrementBitStreamFromMark(mark1));
+        }
+
+        {
+            final BitStream bs = new BitStream(ptr, 32);
+            assertTrue(bs.getBoolean());
+            assertEquals(101, bs.getInt());
+            assertEquals(0, bs.getInt());
+        }
+
+        Bits.unsafe.freeMemory(ptr);
+    }
 }

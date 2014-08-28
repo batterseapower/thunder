@@ -29,6 +29,9 @@ public class Index<K, V> implements AutoCloseable {
         this.vBufferPtr = allocateSharedBufferPointer(vSchema);
     }
 
+    public Schema<K> getKeySchema()   { return kSchema; }
+    public Schema<V> getValueSchema() { return vSchema; }
+
     private static <T> long allocateSharedBufferPointer(Schema<T> schema) {
         if (schema.maximumSizeBits() < 0) {
             // TODO: speculatively allocate a reasonable amount of memory that most allocations of interest might fit into?
@@ -168,7 +171,7 @@ public class Index<K, V> implements AutoCloseable {
                 return null;
             } else {
                 Util.checkErrorCode(rc);
-                bs.initialize(unsafe.getAddress(vBufferPtrNow + Unsafe.ADDRESS_SIZE), (int)unsafe.getAddress(vBufferPtrNow));
+                bs.initialize(unsafe.getAddress(vBufferPtrNow + Unsafe.ADDRESS_SIZE), (int) unsafe.getAddress(vBufferPtrNow));
                 return vSchema.read(bs);
             }
         } finally {
@@ -267,5 +270,10 @@ public class Index<K, V> implements AutoCloseable {
                 return pair;
             }
         };
+    }
+
+    public <K2, V2> Index<K2, V2> reinterpretView(Schema<K2> k2Schema, Schema<V2> v2Schema) {
+        // FIXME: ref count? Or ensure that returned thing can't be closed.
+        return new Index<>(db, dbi, k2Schema, v2Schema);
     }
 }

@@ -19,4 +19,9 @@ public final class Pair<K, V> {
             return Objects.equals(this.k, that.k) && Objects.equals(this.v, that.v);
         }
     }
+
+    @Override
+    public String toString() {
+        return "Pair(" + k + ", " + v + ")";
+    }
 }

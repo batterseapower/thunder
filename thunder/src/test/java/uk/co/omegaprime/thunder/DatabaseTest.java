@@ -868,4 +868,83 @@ public class DatabaseTest {
             }
         }
     }
+
+    @Test
+    public void subcursorWorks() {
+        try (final Database db = createDatabase()) {
+            try (final Transaction tx = db.transaction(false)) {
+                final Index<Pair<Integer, Integer>, String> index = db.createIndex(tx, "Test",
+                        Schema.zip(UnsignedIntegerSchema.INSTANCE, UnsignedIntegerSchema.INSTANCE), new Latin1StringSchema(10));
+
+                index.put(tx, new Pair<>(0, 0), "First0");
+                index.put(tx, new Pair<>(0, 2), "First1");
+                index.put(tx, new Pair<>(100, 0), "Middle0");
+                index.put(tx, new Pair<>(100, 2), "Middle1");
+                index.put(tx, new Pair<>(200, 100), "Singleton");
+                index.put(tx, new Pair<>(0xFFFFFFFF, 0), "Last0");
+                index.put(tx, new Pair<>(0xFFFFFFFF, 2), "Last0");
+
+                try (final Cursor<Pair<Integer, Integer>, String> cursor = index.createCursor(tx)) {
+                    for (int a : new int[] { 0, 100, 0xFFFFFFFF }) {
+                        final Cursorlike<Integer, String> subcursor = cursor.subcursorView(UnsignedIntegerSchema.INSTANCE, UnsignedIntegerSchema.INSTANCE, a);
+
+                        assertTrue(subcursor.moveFirst());
+                        assertEquals(0, subcursor.getKey().intValue());
+                        assertTrue(subcursor.moveNext());
+                        assertEquals(2, subcursor.getKey().intValue());
+                        assertFalse(subcursor.moveNext());
+
+                        assertTrue(subcursor.moveLast());
+                        assertEquals(2, subcursor.getKey().intValue());
+                        assertTrue(subcursor.movePrevious());
+                        assertEquals(0, subcursor.getKey().intValue());
+                        assertFalse(subcursor.movePrevious());
+
+                        assertTrue(subcursor.moveFloor(1));
+                        assertEquals(0, subcursor.getKey().intValue());
+                        assertTrue(subcursor.moveFloor(2));
+                        assertEquals(2, subcursor.getKey().intValue());
+
+                        assertTrue(subcursor.moveCeiling(0));
+                        assertEquals(0, subcursor.getKey().intValue());
+                        assertTrue(subcursor.moveCeiling(1));
+                        assertEquals(2, subcursor.getKey().intValue());
+
+                        assertEquals(new Pair<>(a, 2), cursor.getKey());
+                    }
+
+                    {
+                        final Cursorlike<Integer, String> subcursor = cursor.subcursorView(UnsignedIntegerSchema.INSTANCE, UnsignedIntegerSchema.INSTANCE, 1337);
+                        assertFalse(subcursor.moveFirst());
+                        assertFalse(subcursor.moveLast());
+                        assertFalse(subcursor.moveTo(100));
+                        assertFalse(subcursor.moveCeiling(100));
+                        assertFalse(subcursor.moveFloor(100));
+                    }
+
+                    {
+                        final Cursorlike<Integer, String> subcursor = cursor.subcursorView(UnsignedIntegerSchema.INSTANCE, UnsignedIntegerSchema.INSTANCE, 200);
+                        assertTrue(subcursor.moveFirst());
+                        assertEquals(100, subcursor.getKey().intValue());
+                        assertFalse(subcursor.moveNext());
+
+                        assertTrue(subcursor.moveLast());
+                        assertEquals(100, subcursor.getKey().intValue());
+                        assertFalse(subcursor.movePrevious());
+
+                        assertFalse(subcursor.moveTo(101));
+                        assertTrue(subcursor.moveTo(100));
+
+                        assertEquals(new Pair<>(200, 100), cursor.getKey());
+
+                        assertFalse(subcursor.moveFloor(99));
+                        assertTrue(subcursor.moveFloor(101));
+
+                        assertFalse(subcursor.moveCeiling(101));
+                        assertTrue(subcursor.moveCeiling(99));
+                    }
+                }
+            }
+        }
+    }
 }

@@ -5,7 +5,7 @@ import sun.misc.Unsafe;
 import static uk.co.omegaprime.thunder.Bits.bitsToBytes;
 import static uk.co.omegaprime.thunder.Bits.unsafe;
 
-public class CursorWithDuplicateKeys<K, V> extends Cursor<K, V> {
+public class CursorWithDuplicateKeys<K, V> extends Cursor<K, V> implements AutoCloseable {
     public CursorWithDuplicateKeys(IndexWithDuplicateKeys<K, V> index, Transaction tx, long cursor) {
         super(index, tx, cursor);
     }
@@ -46,12 +46,12 @@ public class CursorWithDuplicateKeys<K, V> extends Cursor<K, V> {
             return isFound(JNI.mdb_cursor_get(cursor, kBufferPtrNow, vBufferPtrNow, op));
         } finally {
             // Need to copy the MDB_vals from the temp structure to the permanent one, in case someone does getKey() now (they should get back k)
-            unsafe.putAddress(bufferPtr,                           unsafe.getAddress(kBufferPtrNow));
-            unsafe.putAddress(bufferPtr +     Unsafe.ADDRESS_SIZE, unsafe.getAddress(kBufferPtrNow + Unsafe.ADDRESS_SIZE));
-            unsafe.putAddress(bufferPtr + 2 * Unsafe.ADDRESS_SIZE, unsafe.getAddress(vBufferPtrNow));
-            unsafe.putAddress(bufferPtr + 3 * Unsafe.ADDRESS_SIZE, unsafe.getAddress(vBufferPtrNow + Unsafe.ADDRESS_SIZE));
+            unsafe.putAddress(buffer.bufferPtr,                           unsafe.getAddress(kBufferPtrNow));
+            unsafe.putAddress(buffer.bufferPtr +     Unsafe.ADDRESS_SIZE, unsafe.getAddress(kBufferPtrNow + Unsafe.ADDRESS_SIZE));
+            unsafe.putAddress(buffer.bufferPtr + 2 * Unsafe.ADDRESS_SIZE, unsafe.getAddress(vBufferPtrNow));
+            unsafe.putAddress(buffer.bufferPtr + 3 * Unsafe.ADDRESS_SIZE, unsafe.getAddress(vBufferPtrNow + Unsafe.ADDRESS_SIZE));
             Index.freeBufferPointer(index.kBufferPtr, kBufferPtrNow);
-            bufferPtrGeneration = tx.generation;
+            buffer.bufferPtrGeneration = tx.generation;
         }
     }
 
@@ -109,7 +109,7 @@ public class CursorWithDuplicateKeys<K, V> extends Cursor<K, V> {
 
         // See the comment in Cursor.put that explains why we have to "needlessly" copy the key from
         // bufferPtr into a fresh buffer for the call to mdb_cursor_put.
-        final long kBufferPtrNow = Index.allocateAndCopyBufferPointer(index.kBufferPtr, bufferPtr);
+        final long kBufferPtrNow = Index.allocateAndCopyBufferPointer(index.kBufferPtr, buffer.bufferPtr);
         final long vBufferPtrNow = Index.allocateBufferPointer(index.vBufferPtr, vSz);
         index.fillBufferPointerFromSchema(index.vSchema, vBufferPtrNow, vSz, v);
         try {
