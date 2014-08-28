@@ -20,29 +20,29 @@ public class Cursor<K, V> implements Cursorlike<K,V>, AutoCloseable {
     // this situation. We could avoid this ever happening in many cases by just call this eagerly after any
     // operation (e.g. a put) that leaves the bufferPtr stale, but because *other* cursors can invalidate
     // bufferPtr as a side effect of their own updates this is a actually bit tricky to guarantee.
-    static class Buffer {
+    static class Shared {
         final long bufferPtr = unsafe.allocateMemory(4 * Unsafe.ADDRESS_SIZE);
         long bufferPtrGeneration;
         long references = 0;
 
-        public Buffer(Transaction tx) {
+        public Shared(Transaction tx) {
             this.bufferPtrGeneration = tx.generation - 1;
         }
     }
 
-    final Buffer buffer;
+    final Shared shared;
 
     public Cursor(Index<K, V> index, Transaction tx, long cursor) {
-        this(index, tx, cursor, new Buffer(tx));
+        this(index, tx, cursor, new Shared(tx));
     }
 
-    private Cursor(Index<K, V> index, Transaction tx, long cursor, Buffer buffer) {
+    private Cursor(Index<K, V> index, Transaction tx, long cursor, Shared shared) {
         this.index = index;
         this.tx = tx;
         this.cursor = cursor;
-        this.buffer = buffer;
+        this.shared = shared;
 
-        buffer.references++;
+        shared.references++;
     }
 
     protected boolean isFound(int rc) {
@@ -55,8 +55,8 @@ public class Cursor<K, V> implements Cursorlike<K,V>, AutoCloseable {
     }
 
     protected boolean move(int op) {
-        boolean result = isFound(JNI.mdb_cursor_get(cursor, buffer.bufferPtr, buffer.bufferPtr + 2 * Unsafe.ADDRESS_SIZE, op));
-        buffer.bufferPtrGeneration = tx.generation;
+        boolean result = isFound(JNI.mdb_cursor_get(cursor, shared.bufferPtr, shared.bufferPtr + 2 * Unsafe.ADDRESS_SIZE, op));
+        shared.bufferPtrGeneration = tx.generation;
         return result;
     }
 
@@ -65,7 +65,7 @@ public class Cursor<K, V> implements Cursorlike<K,V>, AutoCloseable {
     @Override public boolean moveNext()     { return move(JNI.MDB_NEXT); }
     @Override public boolean movePrevious() { return move(JNI.MDB_PREV); }
 
-    protected boolean refreshBufferPtr() { return buffer.bufferPtrGeneration == tx.generation || move(JNI.MDB_GET_CURRENT); }
+    protected boolean refreshBufferPtr() { return shared.bufferPtrGeneration == tx.generation || move(JNI.MDB_GET_CURRENT); }
 
     private boolean move(K k, int op) {
         final int kSz = bitsToBytes(index.kSchema.sizeBits(k));
@@ -73,12 +73,12 @@ public class Cursor<K, V> implements Cursorlike<K,V>, AutoCloseable {
         final long kBufferPtrNow = Index.allocateBufferPointer(index.kBufferPtr, kSz);
         index.fillBufferPointerFromSchema(index.kSchema, kBufferPtrNow, kSz, k);
         try {
-            return isFound(JNI.mdb_cursor_get(cursor, kBufferPtrNow, buffer.bufferPtr + 2 * Unsafe.ADDRESS_SIZE, op));
+            return isFound(JNI.mdb_cursor_get(cursor, kBufferPtrNow, shared.bufferPtr + 2 * Unsafe.ADDRESS_SIZE, op));
         } finally {
             // Need to copy the MDB_val from the temp structure to the permanent one, in case someone does getKey() now (they should get back k)
-            unsafe.putAddress(buffer.bufferPtr,                       unsafe.getAddress(kBufferPtrNow));
-            unsafe.putAddress(buffer.bufferPtr + Unsafe.ADDRESS_SIZE, unsafe.getAddress(kBufferPtrNow + Unsafe.ADDRESS_SIZE));
-            buffer.bufferPtrGeneration = tx.generation;
+            unsafe.putAddress(shared.bufferPtr,                       unsafe.getAddress(kBufferPtrNow));
+            unsafe.putAddress(shared.bufferPtr + Unsafe.ADDRESS_SIZE, unsafe.getAddress(kBufferPtrNow + Unsafe.ADDRESS_SIZE));
+            shared.bufferPtrGeneration = tx.generation;
             Index.freeBufferPointer(index.kBufferPtr, kBufferPtrNow);
         }
     }
@@ -108,7 +108,7 @@ public class Cursor<K, V> implements Cursorlike<K,V>, AutoCloseable {
         final int szBits = schema.sizeBits(kv);
         final int sz = bitsToBytes(szBits);
 
-        final long theirSz = unsafe.getAddress(buffer.bufferPtr + byteOffsetFromBufferPtr);
+        final long theirSz = unsafe.getAddress(shared.bufferPtr + byteOffsetFromBufferPtr);
         if (allowOurValueToBeAPrefix ? sz > theirSz : sz != theirSz) {
             return false;
         }
@@ -116,7 +116,7 @@ public class Cursor<K, V> implements Cursorlike<K,V>, AutoCloseable {
         final long bufferPtrNow = Index.allocateBufferPointer(scratchBufferPtr, sz);
         index.fillBufferPointerFromSchema(schema, bufferPtrNow, sz, kv);
         try {
-            final long ourPtr   = unsafe.getAddress(buffer.bufferPtr + byteOffsetFromBufferPtr + Unsafe.ADDRESS_SIZE);
+            final long ourPtr   = unsafe.getAddress(shared.bufferPtr + byteOffsetFromBufferPtr + Unsafe.ADDRESS_SIZE);
             final long theirPtr = bufferPtrNow + 2 * Unsafe.ADDRESS_SIZE;
             for (int i = 0; i < sz - (szBits % 8 != 0 ? 1 : 0); i++) {
                 if (unsafe.getByte(ourPtr + i) != unsafe.getByte(theirPtr + i)) {
@@ -142,14 +142,14 @@ public class Cursor<K, V> implements Cursorlike<K,V>, AutoCloseable {
     @Override
     public K getKey() {
         refreshBufferPtr();
-        index.bs.initialize(unsafe.getAddress(buffer.bufferPtr + Unsafe.ADDRESS_SIZE), (int)unsafe.getAddress(buffer.bufferPtr));
+        index.bs.initialize(unsafe.getAddress(shared.bufferPtr + Unsafe.ADDRESS_SIZE), (int)unsafe.getAddress(shared.bufferPtr));
         return index.kSchema.read(index.bs);
     }
 
     @Override
     public V getValue() {
         refreshBufferPtr();
-        index.bs.initialize(unsafe.getAddress(buffer.bufferPtr + 3 * Unsafe.ADDRESS_SIZE), (int)unsafe.getAddress(buffer.bufferPtr + 2 * Unsafe.ADDRESS_SIZE));
+        index.bs.initialize(unsafe.getAddress(shared.bufferPtr + 3 * Unsafe.ADDRESS_SIZE), (int)unsafe.getAddress(shared.bufferPtr + 2 * Unsafe.ADDRESS_SIZE));
         return index.vSchema.read(index.bs);
     }
 
@@ -164,11 +164,11 @@ public class Cursor<K, V> implements Cursorlike<K,V>, AutoCloseable {
         // Reason: the pointers in bufferPtr generally come from mdb_get, and as the docs state "Values returned
         // from the database are valid only until a subsequent update operation, or the end of the transaction".
         // In particular I found that trying to use them as an *input* to an update operation causes DB corruption.
-        final long kBufferPtrNow = Index.allocateAndCopyBufferPointer(index.kBufferPtr, buffer.bufferPtr);
+        final long kBufferPtrNow = Index.allocateAndCopyBufferPointer(index.kBufferPtr, shared.bufferPtr);
         try {
-            unsafe.putAddress(buffer.bufferPtr + 2 * Unsafe.ADDRESS_SIZE, vSz);
-            Util.checkErrorCode(JNI.mdb_cursor_put(cursor, kBufferPtrNow, buffer.bufferPtr + 2 * Unsafe.ADDRESS_SIZE, JNI.MDB_CURRENT | JNI.MDB_RESERVE));
-            index.bs.initialize(unsafe.getAddress(buffer.bufferPtr + 3 * Unsafe.ADDRESS_SIZE), vSz);
+            unsafe.putAddress(shared.bufferPtr + 2 * Unsafe.ADDRESS_SIZE, vSz);
+            Util.checkErrorCode(JNI.mdb_cursor_put(cursor, kBufferPtrNow, shared.bufferPtr + 2 * Unsafe.ADDRESS_SIZE, JNI.MDB_CURRENT | JNI.MDB_RESERVE));
+            index.bs.initialize(unsafe.getAddress(shared.bufferPtr + 3 * Unsafe.ADDRESS_SIZE), vSz);
             index.vSchema.write(index.bs, v);
             index.bs.zeroFill();
         } finally {
@@ -234,15 +234,15 @@ public class Cursor<K, V> implements Cursorlike<K,V>, AutoCloseable {
     }
 
     public void close() {
-        if (--buffer.references == 0) {
-            unsafe.freeMemory(buffer.bufferPtr);
+        if (--shared.references == 0) {
+            unsafe.freeMemory(shared.bufferPtr);
             JNI.mdb_cursor_close(cursor);
         }
     }
 
     public <K2, V2> Cursor<K2, V2> reinterpretView(Schema<K2> k2Schema, Schema<V2> v2Schema) {
-        // It is because of this that we need to ref count the buffer
-        return new Cursor<>(index.reinterpretView(k2Schema, v2Schema), tx, cursor, buffer);
+        // It is because of this that we need to ref count the buffer:
+        return new Cursor<>(index.reinterpretView(k2Schema, v2Schema), tx, cursor, shared);
     }
 
     @Override public Schema<K> getKeySchema()   { return index.getKeySchema(); }

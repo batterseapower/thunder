@@ -2,7 +2,6 @@ package uk.co.omegaprime.thunder;
 
 import sun.misc.Unsafe;
 import uk.co.omegaprime.thunder.schema.Schema;
-import uk.co.omegaprime.thunder.schema.VoidSchema;
 
 import static uk.co.omegaprime.thunder.Bits.bitsToBytes;
 

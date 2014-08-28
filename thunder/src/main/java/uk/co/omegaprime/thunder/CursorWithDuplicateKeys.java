@@ -46,12 +46,12 @@ public class CursorWithDuplicateKeys<K, V> extends Cursor<K, V> implements AutoC
             return isFound(JNI.mdb_cursor_get(cursor, kBufferPtrNow, vBufferPtrNow, op));
         } finally {
             // Need to copy the MDB_vals from the temp structure to the permanent one, in case someone does getKey() now (they should get back k)
-            unsafe.putAddress(buffer.bufferPtr,                           unsafe.getAddress(kBufferPtrNow));
-            unsafe.putAddress(buffer.bufferPtr +     Unsafe.ADDRESS_SIZE, unsafe.getAddress(kBufferPtrNow + Unsafe.ADDRESS_SIZE));
-            unsafe.putAddress(buffer.bufferPtr + 2 * Unsafe.ADDRESS_SIZE, unsafe.getAddress(vBufferPtrNow));
-            unsafe.putAddress(buffer.bufferPtr + 3 * Unsafe.ADDRESS_SIZE, unsafe.getAddress(vBufferPtrNow + Unsafe.ADDRESS_SIZE));
+            unsafe.putAddress(shared.bufferPtr,                           unsafe.getAddress(kBufferPtrNow));
+            unsafe.putAddress(shared.bufferPtr +     Unsafe.ADDRESS_SIZE, unsafe.getAddress(kBufferPtrNow + Unsafe.ADDRESS_SIZE));
+            unsafe.putAddress(shared.bufferPtr + 2 * Unsafe.ADDRESS_SIZE, unsafe.getAddress(vBufferPtrNow));
+            unsafe.putAddress(shared.bufferPtr + 3 * Unsafe.ADDRESS_SIZE, unsafe.getAddress(vBufferPtrNow + Unsafe.ADDRESS_SIZE));
             Index.freeBufferPointer(index.kBufferPtr, kBufferPtrNow);
-            buffer.bufferPtrGeneration = tx.generation;
+            shared.bufferPtrGeneration = tx.generation;
         }
     }
 
@@ -109,7 +109,7 @@ public class CursorWithDuplicateKeys<K, V> extends Cursor<K, V> implements AutoC
 
         // See the comment in Cursor.put that explains why we have to "needlessly" copy the key from
         // bufferPtr into a fresh buffer for the call to mdb_cursor_put.
-        final long kBufferPtrNow = Index.allocateAndCopyBufferPointer(index.kBufferPtr, buffer.bufferPtr);
+        final long kBufferPtrNow = Index.allocateAndCopyBufferPointer(index.kBufferPtr, shared.bufferPtr);
         final long vBufferPtrNow = Index.allocateBufferPointer(index.vBufferPtr, vSz);
         index.fillBufferPointerFromSchema(index.vSchema, vBufferPtrNow, vSz, v);
         try {

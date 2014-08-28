@@ -8,7 +8,7 @@ import java.util.Iterator;
 import static uk.co.omegaprime.thunder.Bits.bitsToBytes;
 import static uk.co.omegaprime.thunder.Bits.unsafe;
 
-public class Index<K, V> implements AutoCloseable {
+public class Index<K, V> {
     final Database db;
     final long dbi;
     final Schema<K> kSchema;
@@ -21,7 +21,7 @@ public class Index<K, V> implements AutoCloseable {
 
     public Index(Database db, long dbi, Schema<K> kSchema, Schema<V> vSchema) {
         this.db = db;
-        this.dbi = dbi;
+        this.dbi = dbi; // NB: we never mdb_dbi_close. This should be safe, and avoids Index having to be AutoCloseable
         this.kSchema = kSchema;
         this.vSchema = vSchema;
 
@@ -85,10 +85,11 @@ public class Index<K, V> implements AutoCloseable {
         return new Cursor<>(this, tx, cursorPtr[0]);
     }
 
-    public void close() {
+    @Override
+    public void finalize() throws Throwable {
         freeSharedBufferPointer(kBufferPtr);
         freeSharedBufferPointer(vBufferPtr);
-        JNI.mdb_dbi_close(db.env, dbi);
+        super.finalize();
     }
 
     public void put(Transaction tx, K k, V v) {
@@ -273,7 +274,6 @@ public class Index<K, V> implements AutoCloseable {
     }
 
     public <K2, V2> Index<K2, V2> reinterpretView(Schema<K2> k2Schema, Schema<V2> v2Schema) {
-        // FIXME: ref count? Or ensure that returned thing can't be closed.
         return new Index<>(db, dbi, k2Schema, v2Schema);
     }
 }
