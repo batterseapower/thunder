@@ -78,6 +78,10 @@ public class SubcursorView<K1, K2, V> implements Cursorlike<K2, V> {
         this.k1 = k1;
     }
 
+    public K1 getPosition() {
+        return k1;
+    }
+
     @Override
     public boolean moveFirst() {
         return k1SeekView.moveCeiling(k1) && k1SeekView.keyStartsWith(k1);
