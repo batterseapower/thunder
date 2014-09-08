@@ -7,7 +7,6 @@ import static uk.co.omegaprime.thunder.Bits.bitsToBytes;
 
 public class SubcursorView<K1, K2, V> implements Cursorlike<K2, V> {
     private final Schema<K1> k1Schema;
-    private final Schema<K1> k1SuccSchema;
     private final Schema<K2> k2Schema;
 
     private final Cursor<?, V> cursor;
@@ -20,12 +19,13 @@ public class SubcursorView<K1, K2, V> implements Cursorlike<K2, V> {
 
     // FIXME: only allow this to be used if the current key schema is a pair schema?
     // FIXME: version for cursors with duplicate keys?
+    // TODO: would be cooler if the schema could be inferred from the key type of the cursor..
     public SubcursorView(Cursor<?, V> cursor, Schema<K1> k1Schema, Schema<K2> k2Schema) {
         this.cursor = cursor;
         this.k1Schema = k1Schema;
         this.k2Schema = k2Schema;
 
-        k1SuccSchema = new Schema<K1>() {
+        final Schema<K1> k1SuccSchema = new Schema<K1>() {
             @Override
             public K1 read(BitStream bs) {
                 throw new IllegalStateException("k1SuccSchema.read");
@@ -58,10 +58,10 @@ public class SubcursorView<K1, K2, V> implements Cursorlike<K2, V> {
 
     public SubcursorView(Cursor<?, V> cursor, Schema<K1> k1Schema, Schema<K2> k2Schema, K1 k1) {
         this(cursor, k1Schema, k2Schema);
-        reposition(k1);
+        setPosition(k1);
     }
 
-    public void reposition(K1 k1) {
+    public void setPosition(K1 k1) {
         // Bit of a hack here unfortunately...
         final Index<?, V> index = cursor.index;
         final int k1Sz = bitsToBytes(k1Schema.sizeBits(k1));
