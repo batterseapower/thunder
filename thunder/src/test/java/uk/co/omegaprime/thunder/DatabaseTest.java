@@ -5,8 +5,11 @@ import uk.co.omegaprime.thunder.*;
 import uk.co.omegaprime.thunder.schema.*;
 
 import java.io.File;
+import java.io.IOException;
+import java.nio.file.Files;
 import java.time.LocalDate;
 import java.util.*;
+import java.util.function.Supplier;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -14,11 +17,17 @@ import static org.junit.Assert.assertTrue;
 import static uk.co.omegaprime.thunder.Bits.*;
 
 public class DatabaseTest {
-    static final File dbDirectory = new File("/Users/mbolingbroke/example.lmdb");
+    private Supplier<Database> prepareDatabase() {
+        final File dbDirectory;
+        try {
+            dbDirectory = Files.createTempDirectory("DatabaseTest").toFile();
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
 
-    private Database createDatabase() {
-        if (dbDirectory.exists()) {
-            for (File f : dbDirectory.listFiles()) {
+        final File[] files = dbDirectory.listFiles();
+        if (files != null) {
+            for (File f : files) {
                 f.delete();
             }
             if (!dbDirectory.delete()) {
@@ -26,12 +35,13 @@ public class DatabaseTest {
             }
         }
         dbDirectory.mkdir();
+        dbDirectory.deleteOnExit();
 
-        return openDatabase();
+        return () -> new Database(dbDirectory, new DatabaseOptions().maxIndexes(40).mapSize(1_073_741_824));
     }
 
-    private Database openDatabase() {
-        return new Database(dbDirectory, new DatabaseOptions().maxIndexes(40).mapSize(1_073_741_824));
+    private Database createDatabase() {
+        return prepareDatabase().get();
     }
 
     @Test
@@ -676,7 +686,8 @@ public class DatabaseTest {
 
     @Test
     public void doubleDatabase() {
-        try (final Database db = createDatabase()) {
+        final Supplier<Database> dbSupplier = prepareDatabase();
+        try (final Database db = dbSupplier.get()) {
             try (final Transaction tx = db.transaction(false)) {
                 final Index<Integer, String> index = db.createIndex(tx, "Test", IntegerSchema.INSTANCE, StringSchema.INSTANCE);
 
@@ -688,7 +699,7 @@ public class DatabaseTest {
             }
         }
 
-        try (final Database db = openDatabase()) {
+        try (final Database db = dbSupplier.get()) {
             try (final Transaction tx = db.transaction(true)) {
                 final Index<Integer, String> index = db.createIndex(tx, "Test", IntegerSchema.INSTANCE, StringSchema.INSTANCE);
 
