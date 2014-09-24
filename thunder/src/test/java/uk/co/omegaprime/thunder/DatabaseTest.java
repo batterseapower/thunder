@@ -17,7 +17,7 @@ import static org.junit.Assert.assertTrue;
 import static uk.co.omegaprime.thunder.Bits.*;
 
 public class DatabaseTest {
-    private Supplier<Database> prepareDatabase() {
+    private static Supplier<Database> prepareDatabase() {
         final File dbDirectory;
         try {
             dbDirectory = Files.createTempDirectory("DatabaseTest").toFile();
@@ -40,7 +40,7 @@ public class DatabaseTest {
         return () -> new Database(dbDirectory, new DatabaseOptions().maxIndexes(40).mapSize(1_073_741_824));
     }
 
-    private Database createDatabase() {
+    private static Database createDatabase() {
         return prepareDatabase().get();
     }
 
@@ -876,6 +876,23 @@ public class DatabaseTest {
                 }
 
                 tx.commit();
+            }
+        }
+    }
+
+    @Test
+    public void moveFloorWorksInParticularBuggyCase() {
+        // There was a bug where keyEquals would not compare the final 1 to 7 bits of the key, so moveFloor would erroneously return true
+        try (final Database db = createDatabase()) {
+            try (final Transaction tx = db.transaction(false)) {
+                final Index<Pair<String, Integer>, String> index = db.createIndex(tx, "Test",
+                        Schema.zip(new Latin1StringSchema(20), IntegerSchema.INSTANCE), new Latin1StringSchema(10));
+
+                index.put(tx, new Pair<>("foo", 5), "First0");
+
+                try (final Cursor<Pair<String, Integer>, String> cursor = index.createCursor(tx)) {
+                    assertFalse(cursor.moveFloor(new Pair<>("foo", 4)));
+                }
             }
         }
     }

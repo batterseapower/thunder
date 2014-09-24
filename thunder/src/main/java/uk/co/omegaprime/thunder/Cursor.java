@@ -128,7 +128,7 @@ public class Cursor<K, V> implements Cursorlike<K,V>, AutoCloseable {
                 // Say szBits % 8 == 1
                 // ==> ~((1 << 8 - (szBits % 8)) - 1) == ~((1 << 7) - 1) == ~(10000000b - 1) == ~01111111b == 10000000b
                 final int mask = ~((1 << 8 - (szBits % 8)) - 1);
-                if ((unsafe.getByte(ourPtr + (szBits / 8)) & mask) != (unsafe.getByte(ourPtr + (szBits / 8)) & mask)) {
+                if ((unsafe.getByte(ourPtr + (szBits / 8)) & mask) != (unsafe.getByte(theirPtr + (szBits / 8)) & mask)) {
                     return false;
                 }
             }
