@@ -37,7 +37,7 @@ public class DatabaseTest {
         dbDirectory.mkdir();
         dbDirectory.deleteOnExit();
 
-        return () -> new Database(dbDirectory, new DatabaseOptions().maxIndexes(40).mapSize(1_073_741_824));
+        return () -> new Database(dbDirectory, new DatabaseOptions().maxIndexes(40).mapSize(1024 * 1024));
     }
 
     private static Database createDatabase() {

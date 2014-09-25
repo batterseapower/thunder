@@ -151,11 +151,13 @@ public class SubcursorView<K1, K2, V> implements Cursorlike<K2, V> {
     @Override public Schema<V> getValueSchema() { return cursor.getValueSchema(); }
 
     /*
-    public <C, D> SubcursorView<K1, D, V> subcursorView(Schema<C> cSchema, Schema<D> dSchema, final C c) {
+    public <C, D> SubcursorView<Pair<K1, C>, D, V> subcursorView(Schema<C> cSchema, Schema<D> dSchema, final C c) {
+        // We are SubcursorView<K1, K2, V>
+        //
         // B == C + D
         // K == A + B == A + C + D
-        final SubcursorView<K1, D, V> result = new SubcursorView<>(cursor, Schema.zip(k1Schema, cSchema), dSchema);
-        result.reposition(new Pair<K1, C>(k1, c));
+        final SubcursorView<Pair<K1, C>, D, V> result = new SubcursorView<Pair<K1, C>, D, V>(cursor, Schema.<K1, C>zip(k1Schema, cSchema), dSchema);
+        result.setPosition(new Pair<K1, C>(k1, c));
         return result;
     }
     */
