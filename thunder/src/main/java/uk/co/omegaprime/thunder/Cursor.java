@@ -247,4 +247,7 @@ public class Cursor<K, V> implements Cursorlike<K,V>, AutoCloseable {
 
     @Override public Schema<K> getKeySchema()   { return index.getKeySchema(); }
     @Override public Schema<V> getValueSchema() { return index.getValueSchema(); }
+
+    @Override
+    public Index<K, V> getIndex() { return index; }
 }

@@ -63,7 +63,7 @@ public class SubcursorView<K1, K2, V> implements Cursorlike<K2, V> {
 
     public void setPosition(K1 k1) {
         // Bit of a hack here unfortunately...
-        final Index<?, V> index = cursor.index;
+        final Index<?, ?> index = cursor.getIndex();
         final int k1Sz = bitsToBytes(k1Schema.sizeBits(k1));
         final long aBufferPtrNow = Index.allocateBufferPointer(index.kBufferPtr, k1Sz);
         try {
@@ -82,24 +82,28 @@ public class SubcursorView<K1, K2, V> implements Cursorlike<K2, V> {
         return k1;
     }
 
+    private boolean positionedWithinSubrange() {
+        return k1SeekView.keyStartsWith(k1);
+    }
+
     @Override
     public boolean moveFirst() {
-        return k1SeekView.moveCeiling(k1) && k1SeekView.keyStartsWith(k1);
+        return k1SeekView.moveCeiling(k1) && positionedWithinSubrange();
     }
 
     @Override
     public boolean moveLast() {
-        return (!k1IsMaximum && k1SuccSeekView.moveCeiling(k1) ? k1SeekView.movePrevious() : k1SeekView.moveLast()) && k1SeekView.keyStartsWith(k1);
+        return (!k1IsMaximum && k1SuccSeekView.moveCeiling(k1) ? k1SeekView.movePrevious() : k1SeekView.moveLast()) && positionedWithinSubrange();
     }
 
     @Override
     public boolean moveNext() {
-        return k1SeekView.moveNext() && k1SeekView.keyStartsWith(k1);
+        return k1SeekView.moveNext() && positionedWithinSubrange();
     }
 
     @Override
     public boolean movePrevious() {
-        return k1SeekView.movePrevious() && k1SeekView.keyStartsWith(k1);
+        return k1SeekView.movePrevious() && positionedWithinSubrange();
     }
 
     @Override
@@ -109,12 +113,12 @@ public class SubcursorView<K1, K2, V> implements Cursorlike<K2, V> {
 
     @Override
     public boolean moveCeiling(K2 k2) {
-        return k1k2SeekView.moveCeiling(new Pair<>(k1, k2)) && k1SeekView.keyStartsWith(k1);
+        return k1k2SeekView.moveCeiling(new Pair<>(k1, k2)) && positionedWithinSubrange();
     }
 
     @Override
     public boolean moveFloor(K2 k2) {
-        return k1k2SeekView.moveFloor(new Pair<>(k1, k2)) && k1SeekView.keyStartsWith(k1);
+        return k1k2SeekView.moveFloor(new Pair<>(k1, k2)) && positionedWithinSubrange();
     }
 
     @Override
@@ -149,6 +153,9 @@ public class SubcursorView<K1, K2, V> implements Cursorlike<K2, V> {
 
     @Override public Schema<K2> getKeySchema() { return k2Schema; }
     @Override public Schema<V> getValueSchema() { return cursor.getValueSchema(); }
+
+    @Override
+    public Index<?, ?> getIndex() { return cursor.getIndex(); }
 
     /*
     public <C, D> SubcursorView<Pair<K1, C>, D, V> subcursorView(Schema<C> cSchema, Schema<D> dSchema, final C c) {

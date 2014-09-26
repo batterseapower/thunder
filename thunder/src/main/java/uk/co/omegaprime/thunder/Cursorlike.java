@@ -31,4 +31,6 @@ public interface Cursorlike<K, V> {
 
     Schema<K> getKeySchema();
     Schema<V> getValueSchema();
+
+    Index<?, ?> getIndex();
 }
