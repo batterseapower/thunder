@@ -6,9 +6,9 @@ import java.util.function.BiFunction;
 
 public class FilteredView<K, V> implements Cursorlike<K, V> {
     private final Cursorlike<K, V> cursor;
-    private final BiFunction<K, V, Boolean> predicate;
+    private final BiFunction<? super K, ? super V, Boolean> predicate;
 
-    public FilteredView(Cursorlike<K, V> cursor, BiFunction<K, V, Boolean> predicate) {
+    public FilteredView(Cursorlike<K, V> cursor, BiFunction<? super K, ? super V, Boolean> predicate) {
         this.cursor = cursor;
         this.predicate = predicate;
     }
