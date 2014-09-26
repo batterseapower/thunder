@@ -241,7 +241,7 @@ public class Cursor<K, V> implements Cursorlike<K,V>, AutoCloseable {
     }
 
     public <K2, V2> Cursor<K2, V2> reinterpretView(Schema<K2> k2Schema, Schema<V2> v2Schema) {
-        // It is because of this that we need to ref count the buffer:
+        // It is because both this method and close exist that we need to ref count the buffer:
         return new Cursor<>(index.reinterpretView(k2Schema, v2Schema), tx, cursor, shared);
     }
 
