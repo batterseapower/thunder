@@ -74,4 +74,7 @@ public class FilteredView<K, V> implements Cursorlike<K, V> {
 
     @Override public Schema<K> getKeySchema() { return cursor.getKeySchema(); }
     @Override public Schema<V> getValueSchema() { return cursor.getValueSchema(); }
+
+    @Override
+    public Index<?, ?> getIndex() { return cursor.getIndex(); }
 }
