@@ -4,18 +4,15 @@ import uk.co.omegaprime.thunder.schema.Schema;
 
 public interface Cursorlike<K, V> {
     boolean moveFirst();
-
     boolean moveLast();
-
     boolean moveNext();
-
     boolean movePrevious();
 
     boolean moveTo(K k);
-
     boolean moveCeiling(K k);
-
     boolean moveFloor(K k);
+
+    boolean isPositioned();
 
     K getKey();
 

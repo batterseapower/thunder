@@ -46,7 +46,10 @@ public class Cursor<K, V> implements Cursorlike<K,V>, AutoCloseable {
     }
 
     protected boolean isFound(int rc) {
-        if (rc == JNI.MDB_NOTFOUND) {
+        // The EINVAL check is a bit dodgy. The issue is that LMDB reports EINVAL instead of MDB_NOTFOUND
+        // if e.g. the cursor is not positioned and you do a move to MDB_CURRENT. This is important if we
+        // expect our isPositioned() implementation to work.
+        if (rc == JNI.MDB_NOTFOUND || rc == JNI.EINVAL) {
             return false;
         } else {
             Util.checkErrorCode(rc);
@@ -64,6 +67,7 @@ public class Cursor<K, V> implements Cursorlike<K,V>, AutoCloseable {
     @Override public boolean moveLast()     { return move(JNI.MDB_LAST); }
     @Override public boolean moveNext()     { return move(JNI.MDB_NEXT); }
     @Override public boolean movePrevious() { return move(JNI.MDB_PREV); }
+    @Override public boolean isPositioned() { return move(JNI.MDB_GET_CURRENT); }
 
     protected boolean refreshBufferPtr() { return shared.bufferPtrGeneration == tx.generation || move(JNI.MDB_GET_CURRENT); }
 

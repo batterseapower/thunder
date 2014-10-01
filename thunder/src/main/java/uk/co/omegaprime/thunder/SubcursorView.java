@@ -107,6 +107,9 @@ public class SubcursorView<K1, K2, V> implements Cursorlike<K2, V> {
     }
 
     @Override
+    public boolean isPositioned() { return k1SeekView.isPositioned(); }
+
+    @Override
     public boolean moveTo(K2 k2) {
         return k1k2SeekView.moveTo(new Pair<>(k1, k2));
     }

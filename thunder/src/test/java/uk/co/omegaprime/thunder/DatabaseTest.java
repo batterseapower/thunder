@@ -204,6 +204,81 @@ public class DatabaseTest {
     }
 
     @Test
+    public void deletionLeavesCursorPointingAtNextItem() {
+        try (final Database db = createDatabase()) {
+            try (final Transaction tx = db.transaction(false)) {
+                final Index<Integer, Integer> index = db.createIndex(tx, "Test", IntegerSchema.INSTANCE, IntegerSchema.INSTANCE);
+
+                index.put(tx, 1, 100);
+                index.put(tx, 2, 200);
+                index.put(tx, 3, 100);
+
+                try (final Cursor<Integer, Integer> cursor = index.createCursor(tx)) {
+                    assertTrue(cursor.moveTo(2));
+
+                    cursor.delete();
+                    assertTrue(cursor.isPositioned());
+                    assertEquals(Arrays.asList(1, 3), iteratorToList(index.keys(tx)));
+
+                    cursor.delete();
+                    assertFalse(cursor.isPositioned());
+                    assertEquals(Arrays.asList(1), iteratorToList(index.keys(tx)));
+
+                    assertTrue(cursor.moveFirst());
+                    cursor.delete();
+                    assertFalse(cursor.isPositioned());
+                    assertFalse(index.keys(tx).hasNext());
+                }
+            }
+        }
+    }
+
+    @Test
+    public void deletionLeavesCursorPointingAtNextItemOfDuplicate() {
+        try (final Database db = createDatabase()) {
+            try (final Transaction tx = db.transaction(false)) {
+                final IndexWithDuplicateKeys<Integer, Integer> index = db.createIndexWithDuplicateKeys(tx, "Test", IntegerSchema.INSTANCE, IntegerSchema.INSTANCE);
+
+                index.put(tx, 0, 50);
+                index.put(tx, 1, 100);
+                index.put(tx, 2, 200);
+                index.put(tx, 2, 300);
+                index.put(tx, 3, 400);
+                index.put(tx, 3, 500);
+
+                try (final CursorWithDuplicateKeys<Integer, Integer> cursor = index.createCursor(tx)) {
+                    assertTrue(cursor.moveTo(2));
+
+                    cursor.delete();
+                    assertTrue(cursor.isPositioned());
+                    assertEquals(Arrays.asList(0, 1, 2, 3), iteratorToList(index.keys(tx)));
+                    assertEquals(300, cursor.getValue().intValue());
+
+                    cursor.delete();
+                    assertTrue(cursor.isPositioned());
+                    assertEquals(Arrays.asList(0, 1, 3), iteratorToList(index.keys(tx)));
+                    assertEquals(400, cursor.getValue().intValue());
+
+                    cursor.deleteAllOfKey();
+                    assertFalse(cursor.isPositioned());
+                    assertEquals(Arrays.asList(0, 1), iteratorToList(index.keys(tx)));
+
+                    assertTrue(cursor.moveFirst());
+                    cursor.deleteAllOfKey();
+                    assertTrue(cursor.isPositioned());
+                    assertEquals(Arrays.asList(1), iteratorToList(index.keys(tx)));
+                    assertEquals(100, cursor.getValue().intValue());
+
+                    assertTrue(cursor.moveFirst());
+                    cursor.deleteAllOfKey();
+                    assertFalse(cursor.isPositioned());
+                    assertFalse(index.keys(tx).hasNext());
+                }
+            }
+        }
+    }
+
+    @Test
     public void canCursorAroundIndexWithDuplicateKeys() {
         try (final Database db = createDatabase()) {
             try (final Transaction tx = db.transaction(false)) {
@@ -317,6 +392,7 @@ public class DatabaseTest {
                     assertTrue(cursor.moveTo(2, 200));
 
                     cursor.delete();
+                    assertTrue(cursor.isPositioned());
                     assertFalse(cursor.moveTo(2, 200));
                     assertTrue(cursor.moveTo(2, 300));
                 }

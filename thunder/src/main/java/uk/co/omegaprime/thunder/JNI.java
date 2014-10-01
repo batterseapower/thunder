@@ -51,6 +51,9 @@ class JNI {
     //
     ///////////////////////////////////////////////////////////////////////
 
+    @JniField(flags = {CONSTANT})
+    static public int EINVAL;
+
     @JniMethod(flags={CONSTANT_GETTER})
     public static final native int errno();
 

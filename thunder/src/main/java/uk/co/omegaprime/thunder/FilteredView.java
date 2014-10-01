@@ -55,6 +55,9 @@ public class FilteredView<K, V> implements Cursorlike<K, V> {
     public boolean moveFloor(K k) { return cursor.moveFloor(k) && seekBackwardForMatch(); }
 
     @Override
+    public boolean isPositioned() { return cursor.isPositioned(); }
+
+    @Override
     public K getKey() { return cursor.getKey(); }
 
     @Override
