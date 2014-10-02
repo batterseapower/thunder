@@ -1,7 +1,6 @@
 package uk.co.omegaprime.thunder;
 
 import org.junit.Test;
-import uk.co.omegaprime.thunder.*;
 import uk.co.omegaprime.thunder.schema.*;
 
 import java.io.File;
@@ -16,51 +15,51 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 import static uk.co.omegaprime.thunder.Bits.*;
 
-public class DatabaseTest {
-    private static Supplier<Database> prepareDatabase() {
-        final File dbDirectory;
+public class EnvironmentTest {
+    private static Supplier<Environment> prepareEnvironment() {
+        final File envDirectory;
         try {
-            dbDirectory = Files.createTempDirectory("DatabaseTest").toFile();
+            envDirectory = Files.createTempDirectory("DatabaseTest").toFile();
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
 
-        final File[] files = dbDirectory.listFiles();
+        final File[] files = envDirectory.listFiles();
         if (files != null) {
             for (File f : files) {
                 f.delete();
             }
-            if (!dbDirectory.delete()) {
-                throw new IllegalStateException("Failed to delete target directory " + dbDirectory);
+            if (!envDirectory.delete()) {
+                throw new IllegalStateException("Failed to delete target directory " + envDirectory);
             }
         }
-        dbDirectory.mkdir();
-        dbDirectory.deleteOnExit();
+        envDirectory.mkdir();
+        envDirectory.deleteOnExit();
 
-        return () -> new Database(dbDirectory, new DatabaseOptions().maxIndexes(40).mapSize(1024 * 1024));
+        return () -> new Environment(envDirectory, new EnvironmentOptions().maxDatabases(40).mapSize(1024 * 1024));
     }
 
-    private static Database createDatabase() {
-        return prepareDatabase().get();
+    private static Environment createEnvironment() {
+        return prepareEnvironment().get();
     }
 
     @Test
     public void canCursorAroundPositiveFloatsAndNaNs() {
-        try (final Database db = createDatabase()) {
-            try (final Transaction tx = db.transaction(false)) {
-                final Index<Float, String> index = db.createIndex(tx, "Test", FloatSchema.INSTANCE, StringSchema.INSTANCE);
+        try (final Environment env = createEnvironment()) {
+            try (final Transaction tx = env.transaction(false)) {
+                final Database<Float, String> database = env.createDatabase(tx, "Test", FloatSchema.INSTANCE, StringSchema.INSTANCE);
 
-                index.put(tx, 1.0f, "One");
-                index.put(tx, 1234567890123.0f, "Biggish");
-                index.put(tx, Float.NaN, "Not a number");
-                index.put(tx, Float.POSITIVE_INFINITY, "Infinity");
+                database.put(tx, 1.0f, "One");
+                database.put(tx, 1234567890123.0f, "Biggish");
+                database.put(tx, Float.NaN, "Not a number");
+                database.put(tx, Float.POSITIVE_INFINITY, "Infinity");
 
-                assertEquals("One", index.get(tx, 1.0f));
-                assertEquals("Biggish", index.get(tx, 1234567890123.0f));
-                assertEquals("Not a number", index.get(tx, Float.NaN));
-                assertEquals("Infinity", index.get(tx, Float.POSITIVE_INFINITY));
+                assertEquals("One", database.get(tx, 1.0f));
+                assertEquals("Biggish", database.get(tx, 1234567890123.0f));
+                assertEquals("Not a number", database.get(tx, Float.NaN));
+                assertEquals("Infinity", database.get(tx, Float.POSITIVE_INFINITY));
 
-                try (Cursor<Float, String> cursor = index.createCursor(tx)) {
+                try (Cursor<Float, String> cursor = database.createCursor(tx)) {
                     assertTrue(cursor.moveCeiling(0.5f));
                     assertEquals("One", cursor.getValue());
 
@@ -89,15 +88,15 @@ public class DatabaseTest {
 
     @Test
     public void canStoreLocalDates() {
-        try (final Database db = createDatabase()) {
-            try (final Transaction tx = db.transaction(false)) {
-                final Index<LocalDate, String> index = db.createIndex(tx, "Test", LocalDateSchema.INSTANCE, StringSchema.INSTANCE);
+        try (final Environment env = createEnvironment()) {
+            try (final Transaction tx = env.transaction(false)) {
+                final Database<LocalDate, String> database = env.createDatabase(tx, "Test", LocalDateSchema.INSTANCE, StringSchema.INSTANCE);
 
-                index.put(tx, LocalDate.of(1999, 1, 1), "One");
-                index.put(tx, LocalDate.of(1999, 1, 3), "Two");
-                index.put(tx, LocalDate.of(1999, 1, 5), "Three");
+                database.put(tx, LocalDate.of(1999, 1, 1), "One");
+                database.put(tx, LocalDate.of(1999, 1, 3), "Two");
+                database.put(tx, LocalDate.of(1999, 1, 5), "Three");
 
-                try (Cursor<LocalDate, String> cursor = index.createCursor(tx)) {
+                try (Cursor<LocalDate, String> cursor = database.createCursor(tx)) {
                     assertTrue(cursor.moveCeiling(LocalDate.of(1998, 1, 1)));
                     assertEquals(LocalDate.of(1999, 1, 1), cursor.getKey());
                     assertEquals("One", cursor.getValue());
@@ -118,15 +117,15 @@ public class DatabaseTest {
 
     @Test
     public void canPutWithJustAValueIntoCursor() {
-        try (final Database db = createDatabase()) {
-            try (final Transaction tx = db.transaction(false)) {
-                final Index<Integer, Integer> index = db.createIndex(tx, "Test", IntegerSchema.INSTANCE, IntegerSchema.INSTANCE);
+        try (final Environment env = createEnvironment()) {
+            try (final Transaction tx = env.transaction(false)) {
+                final Database<Integer, Integer> database = env.createDatabase(tx, "Test", IntegerSchema.INSTANCE, IntegerSchema.INSTANCE);
 
-                index.put(tx, 2, 200);
-                index.put(tx, 3, 300);
-                index.put(tx, 5, 400);
+                database.put(tx, 2, 200);
+                database.put(tx, 3, 300);
+                database.put(tx, 5, 400);
 
-                try (Cursor<Integer, Integer> cursor = index.createCursor(tx)) {
+                try (Cursor<Integer, Integer> cursor = database.createCursor(tx)) {
                     assertTrue(cursor.moveTo(3));
                     assertEquals(300, cursor.getValue().intValue());
                     cursor.put(301);
@@ -150,84 +149,84 @@ public class DatabaseTest {
 
     @Test
     public void canRemove() {
-        try (final Database db = createDatabase()) {
-            try (final Transaction tx = db.transaction(false)) {
-                final Index<Integer, Integer> index = db.createIndex(tx, "Test", IntegerSchema.INSTANCE, IntegerSchema.INSTANCE);
+        try (final Environment env = createEnvironment()) {
+            try (final Transaction tx = env.transaction(false)) {
+                final Database<Integer, Integer> database = env.createDatabase(tx, "Test", IntegerSchema.INSTANCE, IntegerSchema.INSTANCE);
 
-                index.put(tx, 1, 100);
-                index.put(tx, 2, 200);
-                index.put(tx, 3, 300);
+                database.put(tx, 1, 100);
+                database.put(tx, 2, 200);
+                database.put(tx, 3, 300);
 
-                assertEquals(Arrays.asList(1, 2, 3), iteratorToList(index.keys(tx)));
+                assertEquals(Arrays.asList(1, 2, 3), iteratorToList(database.keys(tx)));
 
-                assertTrue(index.remove(tx, 2));
-                assertEquals(Arrays.asList(1, 3), iteratorToList(index.keys(tx)));
+                assertTrue(database.remove(tx, 2));
+                assertEquals(Arrays.asList(1, 3), iteratorToList(database.keys(tx)));
 
-                assertFalse(index.remove(tx, 2));
-                assertEquals(Arrays.asList(1, 3), iteratorToList(index.keys(tx)));
+                assertFalse(database.remove(tx, 2));
+                assertEquals(Arrays.asList(1, 3), iteratorToList(database.keys(tx)));
 
-                assertTrue(index.remove(tx, 3));
-                assertEquals(Arrays.asList(1), iteratorToList(index.keys(tx)));
+                assertTrue(database.remove(tx, 3));
+                assertEquals(Arrays.asList(1), iteratorToList(database.keys(tx)));
             }
         }
     }
 
     @Test
     public void canGetValues() {
-        try (final Database db = createDatabase()) {
-            try (final Transaction tx = db.transaction(false)) {
-                final Index<Integer, Integer> index = db.createIndex(tx, "Test", IntegerSchema.INSTANCE, IntegerSchema.INSTANCE);
+        try (final Environment env = createEnvironment()) {
+            try (final Transaction tx = env.transaction(false)) {
+                final Database<Integer, Integer> database = env.createDatabase(tx, "Test", IntegerSchema.INSTANCE, IntegerSchema.INSTANCE);
 
-                index.put(tx, 1, 100);
-                index.put(tx, 2, 200);
-                index.put(tx, 3, 100);
+                database.put(tx, 1, 100);
+                database.put(tx, 2, 200);
+                database.put(tx, 3, 100);
 
-                assertEquals(Arrays.asList(100, 200, 100), iteratorToList(index.values(tx)));
+                assertEquals(Arrays.asList(100, 200, 100), iteratorToList(database.values(tx)));
             }
         }
     }
 
     @Test
     public void canGetKeyValues() {
-        try (final Database db = createDatabase()) {
-            try (final Transaction tx = db.transaction(false)) {
-                final Index<Integer, Integer> index = db.createIndex(tx, "Test", IntegerSchema.INSTANCE, IntegerSchema.INSTANCE);
+        try (final Environment env = createEnvironment()) {
+            try (final Transaction tx = env.transaction(false)) {
+                final Database<Integer, Integer> database = env.createDatabase(tx, "Test", IntegerSchema.INSTANCE, IntegerSchema.INSTANCE);
 
-                index.put(tx, 1, 100);
-                index.put(tx, 2, 200);
-                index.put(tx, 3, 100);
+                database.put(tx, 1, 100);
+                database.put(tx, 2, 200);
+                database.put(tx, 3, 100);
 
                 assertEquals(Arrays.asList(new Pair<>(1, 100), new Pair<>(2, 200), new Pair<>(3, 100)),
-                             iteratorToList(index.keyValues(tx)));
+                             iteratorToList(database.keyValues(tx)));
             }
         }
     }
 
     @Test
     public void deletionLeavesCursorPointingAtNextItem() {
-        try (final Database db = createDatabase()) {
-            try (final Transaction tx = db.transaction(false)) {
-                final Index<Integer, Integer> index = db.createIndex(tx, "Test", IntegerSchema.INSTANCE, IntegerSchema.INSTANCE);
+        try (final Environment env = createEnvironment()) {
+            try (final Transaction tx = env.transaction(false)) {
+                final Database<Integer, Integer> database = env.createDatabase(tx, "Test", IntegerSchema.INSTANCE, IntegerSchema.INSTANCE);
 
-                index.put(tx, 1, 100);
-                index.put(tx, 2, 200);
-                index.put(tx, 3, 100);
+                database.put(tx, 1, 100);
+                database.put(tx, 2, 200);
+                database.put(tx, 3, 100);
 
-                try (final Cursor<Integer, Integer> cursor = index.createCursor(tx)) {
+                try (final Cursor<Integer, Integer> cursor = database.createCursor(tx)) {
                     assertTrue(cursor.moveTo(2));
 
                     cursor.delete();
                     assertTrue(cursor.isPositioned());
-                    assertEquals(Arrays.asList(1, 3), iteratorToList(index.keys(tx)));
+                    assertEquals(Arrays.asList(1, 3), iteratorToList(database.keys(tx)));
 
                     cursor.delete();
                     assertFalse(cursor.isPositioned());
-                    assertEquals(Arrays.asList(1), iteratorToList(index.keys(tx)));
+                    assertEquals(Arrays.asList(1), iteratorToList(database.keys(tx)));
 
                     assertTrue(cursor.moveFirst());
                     cursor.delete();
                     assertFalse(cursor.isPositioned());
-                    assertFalse(index.keys(tx).hasNext());
+                    assertFalse(database.keys(tx).hasNext());
                 }
             }
         }
@@ -235,63 +234,63 @@ public class DatabaseTest {
 
     @Test
     public void deletionLeavesCursorPointingAtNextItemOfDuplicate() {
-        try (final Database db = createDatabase()) {
-            try (final Transaction tx = db.transaction(false)) {
-                final IndexWithDuplicateKeys<Integer, Integer> index = db.createIndexWithDuplicateKeys(tx, "Test", IntegerSchema.INSTANCE, IntegerSchema.INSTANCE);
+        try (final Environment env = createEnvironment()) {
+            try (final Transaction tx = env.transaction(false)) {
+                final DatabaseWithDuplicateKeys<Integer, Integer> database = env.createDatabaseWithDuplicateKeys(tx, "Test", IntegerSchema.INSTANCE, IntegerSchema.INSTANCE);
 
-                index.put(tx, 0, 50);
-                index.put(tx, 1, 100);
-                index.put(tx, 2, 200);
-                index.put(tx, 2, 300);
-                index.put(tx, 3, 400);
-                index.put(tx, 3, 500);
+                database.put(tx, 0, 50);
+                database.put(tx, 1, 100);
+                database.put(tx, 2, 200);
+                database.put(tx, 2, 300);
+                database.put(tx, 3, 400);
+                database.put(tx, 3, 500);
 
-                try (final CursorWithDuplicateKeys<Integer, Integer> cursor = index.createCursor(tx)) {
+                try (final CursorWithDuplicateKeys<Integer, Integer> cursor = database.createCursor(tx)) {
                     assertTrue(cursor.moveTo(2));
 
                     cursor.delete();
                     assertTrue(cursor.isPositioned());
-                    assertEquals(Arrays.asList(0, 1, 2, 3), iteratorToList(index.keys(tx)));
+                    assertEquals(Arrays.asList(0, 1, 2, 3), iteratorToList(database.keys(tx)));
                     assertEquals(300, cursor.getValue().intValue());
 
                     cursor.delete();
                     assertTrue(cursor.isPositioned());
-                    assertEquals(Arrays.asList(0, 1, 3), iteratorToList(index.keys(tx)));
+                    assertEquals(Arrays.asList(0, 1, 3), iteratorToList(database.keys(tx)));
                     assertEquals(400, cursor.getValue().intValue());
 
                     cursor.deleteAllOfKey();
                     assertFalse(cursor.isPositioned());
-                    assertEquals(Arrays.asList(0, 1), iteratorToList(index.keys(tx)));
+                    assertEquals(Arrays.asList(0, 1), iteratorToList(database.keys(tx)));
 
                     assertTrue(cursor.moveFirst());
                     cursor.deleteAllOfKey();
                     assertTrue(cursor.isPositioned());
-                    assertEquals(Arrays.asList(1), iteratorToList(index.keys(tx)));
+                    assertEquals(Arrays.asList(1), iteratorToList(database.keys(tx)));
                     assertEquals(100, cursor.getValue().intValue());
 
                     assertTrue(cursor.moveFirst());
                     cursor.deleteAllOfKey();
                     assertFalse(cursor.isPositioned());
-                    assertFalse(index.keys(tx).hasNext());
+                    assertFalse(database.keys(tx).hasNext());
                 }
             }
         }
     }
 
     @Test
-    public void canCursorAroundIndexWithDuplicateKeys() {
-        try (final Database db = createDatabase()) {
-            try (final Transaction tx = db.transaction(false)) {
-                final IndexWithDuplicateKeys<Integer, Integer> index = db.createIndexWithDuplicateKeys(tx, "Test", IntegerSchema.INSTANCE, IntegerSchema.INSTANCE);
+    public void canCursorAroundDatabaseWithDuplicateKeys() {
+        try (final Environment env = createEnvironment()) {
+            try (final Transaction tx = env.transaction(false)) {
+                final DatabaseWithDuplicateKeys<Integer, Integer> database = env.createDatabaseWithDuplicateKeys(tx, "Test", IntegerSchema.INSTANCE, IntegerSchema.INSTANCE);
 
-                index.put(tx, 1, 100);
-                index.put(tx, 2, 200);
-                index.put(tx, 2, 200);
-                index.put(tx, 2, 300);
-                index.put(tx, 2, 200);
-                index.put(tx, 4, 400);
+                database.put(tx, 1, 100);
+                database.put(tx, 2, 200);
+                database.put(tx, 2, 200);
+                database.put(tx, 2, 300);
+                database.put(tx, 2, 200);
+                database.put(tx, 4, 400);
 
-                try (CursorWithDuplicateKeys<Integer, Integer> cursor = index.createCursor(tx)) {
+                try (CursorWithDuplicateKeys<Integer, Integer> cursor = database.createCursor(tx)) {
                     assertTrue(cursor.moveFirst());
                     assertEquals(1, cursor.getKey().intValue());
                     assertEquals(100, cursor.getValue().intValue());
@@ -351,17 +350,17 @@ public class DatabaseTest {
     }
 
     @Test
-    public void canCursorSeekIntoIndexWithDuplicateKeys() {
-        try (final Database db = createDatabase()) {
-            try (final Transaction tx = db.transaction(false)) {
-                final IndexWithDuplicateKeys<Integer, Integer> index = db.createIndexWithDuplicateKeys(tx, "Test", UnsignedIntegerSchema.INSTANCE, UnsignedIntegerSchema.INSTANCE);
+    public void canCursorSeekIntoDatabaseWithDuplicateKeys() {
+        try (final Environment env = createEnvironment()) {
+            try (final Transaction tx = env.transaction(false)) {
+                final DatabaseWithDuplicateKeys<Integer, Integer> database = env.createDatabaseWithDuplicateKeys(tx, "Test", UnsignedIntegerSchema.INSTANCE, UnsignedIntegerSchema.INSTANCE);
 
-                index.put(tx, 1, 100);
-                index.put(tx, 2, 200);
-                index.put(tx, 2, 300);
-                index.put(tx, 4, 400);
+                database.put(tx, 1, 100);
+                database.put(tx, 2, 200);
+                database.put(tx, 2, 300);
+                database.put(tx, 4, 400);
 
-                try (CursorWithDuplicateKeys<Integer, Integer> cursor = index.createCursor(tx)) {
+                try (CursorWithDuplicateKeys<Integer, Integer> cursor = database.createCursor(tx)) {
                     assertTrue(cursor.moveFloor(3));
                     assertEquals(300, cursor.getValue().intValue());
 
@@ -402,16 +401,16 @@ public class DatabaseTest {
 
     @Test
     public void canPutWithJustAValueIntoCursorWithDuplicateKeys() {
-        try (final Database db = createDatabase()) {
-            try (final Transaction tx = db.transaction(false)) {
-                final IndexWithDuplicateKeys<Integer, Integer> index = db.createIndexWithDuplicateKeys(tx, "Test", IntegerSchema.INSTANCE, IntegerSchema.INSTANCE);
+        try (final Environment env = createEnvironment()) {
+            try (final Transaction tx = env.transaction(false)) {
+                final DatabaseWithDuplicateKeys<Integer, Integer> database = env.createDatabaseWithDuplicateKeys(tx, "Test", IntegerSchema.INSTANCE, IntegerSchema.INSTANCE);
 
-                index.put(tx, 2, 200);
-                index.put(tx, 2, 200);
-                index.put(tx, 2, 300);
-                index.put(tx, 2, 300);
+                database.put(tx, 2, 200);
+                database.put(tx, 2, 200);
+                database.put(tx, 2, 300);
+                database.put(tx, 2, 300);
 
-                try (CursorWithDuplicateKeys<Integer, Integer> cursor = index.createCursor(tx)) {
+                try (CursorWithDuplicateKeys<Integer, Integer> cursor = database.createCursor(tx)) {
                     assertTrue(cursor.moveTo(2));
                     assertEquals(2, cursor.keyItemCount());
 
@@ -430,56 +429,56 @@ public class DatabaseTest {
     }
 
     @Test
-    public void indexLevelOperationsWorkOnIndexWithDuplicateKeys() {
-        try (final Database db = createDatabase()) {
-            try (final Transaction tx = db.transaction(false)) {
-                final IndexWithDuplicateKeys<Integer, Integer> index = db.createIndexWithDuplicateKeys(tx, "Test", IntegerSchema.INSTANCE, IntegerSchema.INSTANCE);
+    public void databaseLevelOperationsWorkOnDatabaseWithDuplicateKeys() {
+        try (final Environment env = createEnvironment()) {
+            try (final Transaction tx = env.transaction(false)) {
+                final DatabaseWithDuplicateKeys<Integer, Integer> database = env.createDatabaseWithDuplicateKeys(tx, "Test", IntegerSchema.INSTANCE, IntegerSchema.INSTANCE);
 
-                index.put(tx, 1, 100);
-                index.put(tx, 2, 200);
-                index.put(tx, 2, 200);
-                index.put(tx, 2, 300);
-                index.put(tx, 2, 200);
-                index.put(tx, 4, 400);
+                database.put(tx, 1, 100);
+                database.put(tx, 2, 200);
+                database.put(tx, 2, 200);
+                database.put(tx, 2, 300);
+                database.put(tx, 2, 200);
+                database.put(tx, 4, 400);
 
-                assertTrue(index.contains(tx, 1, 100));
-                assertFalse(index.contains(tx, 1, 150));
-                assertTrue(index.contains(tx, 2, 200));
-                assertFalse(index.contains(tx, 2, 250));
-                assertTrue(index.contains(tx, 2, 300));
+                assertTrue(database.contains(tx, 1, 100));
+                assertFalse(database.contains(tx, 1, 150));
+                assertTrue(database.contains(tx, 2, 200));
+                assertFalse(database.contains(tx, 2, 250));
+                assertTrue(database.contains(tx, 2, 300));
 
-                assertTrue(index.remove(tx, 2, 200));
-                assertFalse(index.contains(tx, 2, 200));
-                assertTrue(index.contains(tx, 2, 300));
+                assertTrue(database.remove(tx, 2, 200));
+                assertFalse(database.contains(tx, 2, 200));
+                assertTrue(database.contains(tx, 2, 300));
 
-                assertFalse(index.remove(tx, 2, 250));
+                assertFalse(database.remove(tx, 2, 250));
 
-                assertTrue(index.remove(tx, 1, 100));
-                assertFalse(index.contains(tx, 1, 100));
+                assertTrue(database.remove(tx, 1, 100));
+                assertFalse(database.contains(tx, 1, 100));
 
-                index.put(tx, 2, 200);
-                assertTrue(index.remove(tx, 2));
-                assertFalse(index.contains(tx, 2, 200));
-                assertFalse(index.contains(tx, 2, 300));
+                database.put(tx, 2, 200);
+                assertTrue(database.remove(tx, 2));
+                assertFalse(database.contains(tx, 2, 200));
+                assertFalse(database.contains(tx, 2, 300));
 
-                assertFalse(index.remove(tx, 2));
+                assertFalse(database.remove(tx, 2));
             }
         }
     }
 
     @Test
-    public void putIfAbsentShouldWorkOnNormalIndex() {
-        try (final Database db = createDatabase()) {
-            try (final Transaction tx = db.transaction(false)) {
-                final Index<Integer, Integer> index = db.createIndex(tx, "Test", IntegerSchema.INSTANCE, IntegerSchema.INSTANCE);
+    public void putIfAbsentShouldWorkOnNormalDatabase() {
+        try (final Environment env = createEnvironment()) {
+            try (final Transaction tx = env.transaction(false)) {
+                final Database<Integer, Integer> database = env.createDatabase(tx, "Test", IntegerSchema.INSTANCE, IntegerSchema.INSTANCE);
 
-                assertEquals(null, index.putIfAbsent(tx, 1, 100));
-                assertEquals(Integer.valueOf(100), index.putIfAbsent(tx, 1, 100));
-                assertEquals(Integer.valueOf(100), index.putIfAbsent(tx, 1, 200));
-                assertEquals(Integer.valueOf(100), index.putIfAbsent(tx, 1, 100));
-                assertEquals(null, index.putIfAbsent(tx, 2, 100));
+                assertEquals(null, database.putIfAbsent(tx, 1, 100));
+                assertEquals(Integer.valueOf(100), database.putIfAbsent(tx, 1, 100));
+                assertEquals(Integer.valueOf(100), database.putIfAbsent(tx, 1, 200));
+                assertEquals(Integer.valueOf(100), database.putIfAbsent(tx, 1, 100));
+                assertEquals(null, database.putIfAbsent(tx, 2, 100));
 
-                try (Cursor<Integer, Integer> cursor = index.createCursor(tx)) {
+                try (Cursor<Integer, Integer> cursor = database.createCursor(tx)) {
                     assertEquals(Integer.valueOf(100), cursor.putIfAbsent(2, 200));
                     assertEquals(100, cursor.getValue().intValue());
                     assertEquals(null, cursor.putIfAbsent(3, 100));
@@ -490,18 +489,18 @@ public class DatabaseTest {
     }
 
     @Test
-    public void putIfAbsentShouldWorkOnIndexWithDuplicates() {
-        try (final Database db = createDatabase()) {
-            try (final Transaction tx = db.transaction(false)) {
-                final IndexWithDuplicateKeys<Integer, Integer> index = db.createIndexWithDuplicateKeys(tx, "Test", IntegerSchema.INSTANCE, IntegerSchema.INSTANCE);
+    public void putIfAbsentShouldWorkOnDatabaseWithDuplicates() {
+        try (final Environment env = createEnvironment()) {
+            try (final Transaction tx = env.transaction(false)) {
+                final DatabaseWithDuplicateKeys<Integer, Integer> database = env.createDatabaseWithDuplicateKeys(tx, "Test", IntegerSchema.INSTANCE, IntegerSchema.INSTANCE);
 
-                assertEquals(null, index.putIfAbsent(tx, 1, 100));
-                assertEquals(Integer.valueOf(100), index.putIfAbsent(tx, 1, 100));
-                assertEquals(null, index.putIfAbsent(tx, 1, 200));
-                assertEquals(Integer.valueOf(100), index.putIfAbsent(tx, 1, 100));
-                assertEquals(null, index.putIfAbsent(tx, 2, 100));
+                assertEquals(null, database.putIfAbsent(tx, 1, 100));
+                assertEquals(Integer.valueOf(100), database.putIfAbsent(tx, 1, 100));
+                assertEquals(null, database.putIfAbsent(tx, 1, 200));
+                assertEquals(Integer.valueOf(100), database.putIfAbsent(tx, 1, 100));
+                assertEquals(null, database.putIfAbsent(tx, 2, 100));
 
-                try (CursorWithDuplicateKeys<Integer, Integer> cursor = index.createCursor(tx)) {
+                try (CursorWithDuplicateKeys<Integer, Integer> cursor = database.createCursor(tx)) {
                     assertEquals(Integer.valueOf(100), cursor.putIfAbsent(2, 100));
                     assertEquals(100, cursor.getValue().intValue());
                     assertEquals(null, cursor.putIfAbsent(2, 200));
@@ -517,16 +516,16 @@ public class DatabaseTest {
 
     @Test
     public void deleteAllOfKeyWorks() {
-        try (final Database db = createDatabase()) {
-            try (final Transaction tx = db.transaction(false)) {
-                final IndexWithDuplicateKeys<Integer, Integer> index = db.createIndexWithDuplicateKeys(tx, "Test", IntegerSchema.INSTANCE, IntegerSchema.INSTANCE);
+        try (final Environment env = createEnvironment()) {
+            try (final Transaction tx = env.transaction(false)) {
+                final DatabaseWithDuplicateKeys<Integer, Integer> database = env.createDatabaseWithDuplicateKeys(tx, "Test", IntegerSchema.INSTANCE, IntegerSchema.INSTANCE);
 
-                index.put(tx, 1, 100);
-                index.put(tx, 1, 200);
-                index.put(tx, 2, 100);
-                index.put(tx, 3, 200);
+                database.put(tx, 1, 100);
+                database.put(tx, 1, 200);
+                database.put(tx, 2, 100);
+                database.put(tx, 3, 200);
 
-                try (CursorWithDuplicateKeys<Integer, Integer> cursor = index.createCursor(tx)) {
+                try (CursorWithDuplicateKeys<Integer, Integer> cursor = database.createCursor(tx)) {
                     assertTrue(cursor.moveFirst());
                     assertEquals(2, cursor.keyItemCount());
 
@@ -553,16 +552,16 @@ public class DatabaseTest {
 
     @Test
     public void canStoreNullFreeStrings() {
-        try (final Database db = createDatabase()) {
-            try (final Transaction tx = db.transaction(false)) {
-                final Index<String, Long> index = db.createIndex(tx, "Test", NullFreeStringSchema.INSTANCE, LongSchema.INSTANCE);
+        try (final Environment env = createEnvironment()) {
+            try (final Transaction tx = env.transaction(false)) {
+                final Database<String, Long> database = env.createDatabase(tx, "Test", NullFreeStringSchema.INSTANCE, LongSchema.INSTANCE);
 
-                index.put(tx, "Foo", 1l);
-                index.put(tx, "Fooa", 2l);
-                index.put(tx, "Fo", 3l);
-                index.put(tx, "Foa", 4l);
+                database.put(tx, "Foo", 1l);
+                database.put(tx, "Fooa", 2l);
+                database.put(tx, "Fo", 3l);
+                database.put(tx, "Foa", 4l);
 
-                assertEquals(Arrays.asList("Fo", "Foa", "Foo", "Fooa"), iteratorToList(index.keys(tx)));
+                assertEquals(Arrays.asList("Fo", "Foa", "Foo", "Fooa"), iteratorToList(database.keys(tx)));
 
                 tx.commit();
             }
@@ -571,16 +570,16 @@ public class DatabaseTest {
 
     @Test
     public void canStoreStrings() {
-        try (final Database db = createDatabase()) {
-            try (final Transaction tx = db.transaction(false)) {
-                final Index<String, Long> index = db.createIndex(tx, "Test", StringSchema.INSTANCE, LongSchema.INSTANCE);
+        try (final Environment env = createEnvironment()) {
+            try (final Transaction tx = env.transaction(false)) {
+                final Database<String, Long> database = env.createDatabase(tx, "Test", StringSchema.INSTANCE, LongSchema.INSTANCE);
 
-                index.put(tx, "Foo", 1l);
-                index.put(tx, "Fooa", 2l);
-                index.put(tx, "Fo", 3l);
-                index.put(tx, "Foa", 4l);
+                database.put(tx, "Foo", 1l);
+                database.put(tx, "Fooa", 2l);
+                database.put(tx, "Fo", 3l);
+                database.put(tx, "Foa", 4l);
 
-                assertEquals(Arrays.asList("Fo", "Foa", "Foo", "Fooa"), iteratorToList(index.keys(tx)));
+                assertEquals(Arrays.asList("Fo", "Foa", "Foo", "Fooa"), iteratorToList(database.keys(tx)));
 
                 tx.commit();
             }
@@ -589,22 +588,22 @@ public class DatabaseTest {
 
     @Test
     public void canStoreCompositeStringKey() {
-        try (final Database db = createDatabase()) {
-            try (final Transaction tx = db.transaction(false)) {
-                final Index<String, Integer> index = db.createIndex(tx, "Test", Schema.zipWith(StringSchema.INSTANCE, (String x) -> x.split("/", 2)[0],
-                                                                                               StringSchema.INSTANCE, (String x) -> x.split("/", 2)[1],
-                                                                                               (String x, String y) -> x + "/" + y),
-                                                                                IntegerSchema.INSTANCE);
+        try (final Environment env = createEnvironment()) {
+            try (final Transaction tx = env.transaction(false)) {
+                final Database<String, Integer> database = env.createDatabase(tx, "Test", Schema.zipWith(StringSchema.INSTANCE, (String x) -> x.split("/", 2)[0],
+                                StringSchema.INSTANCE, (String x) -> x.split("/", 2)[1],
+                                (String x, String y) -> x + "/" + y),
+                        IntegerSchema.INSTANCE);
 
-                index.put(tx, "Food/Bean", 10);
-                index.put(tx, "Air/Bean", 11);
-                index.put(tx, "Apple/Bean", 12);
-                index.put(tx, "Apple/Beans", 13);
-                index.put(tx, "Apple/Carrot", 14);
-                index.put(tx, "Airpie/Bean", 15);
+                database.put(tx, "Food/Bean", 10);
+                database.put(tx, "Air/Bean", 11);
+                database.put(tx, "Apple/Bean", 12);
+                database.put(tx, "Apple/Beans", 13);
+                database.put(tx, "Apple/Carrot", 14);
+                database.put(tx, "Airpie/Bean", 15);
 
                 assertEquals(Arrays.asList("Air/Bean", "Airpie/Bean", "Apple/Bean", "Apple/Beans", "Apple/Carrot", "Food/Bean"),
-                             iteratorToList(index.keys(tx)));
+                             iteratorToList(database.keys(tx)));
 
                 tx.commit();
             }
@@ -613,16 +612,16 @@ public class DatabaseTest {
 
     @Test
     public void canStoreLongs() {
-        try (final Database db = createDatabase()) {
-            try (final Transaction tx = db.transaction(false)) {
-                final Index<Long, String> index = db.createIndex(tx, "Test", LongSchema.INSTANCE, StringSchema.INSTANCE);
+        try (final Environment env = createEnvironment()) {
+            try (final Transaction tx = env.transaction(false)) {
+                final Database<Long, String> database = env.createDatabase(tx, "Test", LongSchema.INSTANCE, StringSchema.INSTANCE);
 
-                index.put(tx, -100000000l, "Neg Big");
-                index.put(tx, -1l, "Neg One");
-                index.put(tx, 1l, "One");
-                index.put(tx, 100000000l, "Big");
+                database.put(tx, -100000000l, "Neg Big");
+                database.put(tx, -1l, "Neg One");
+                database.put(tx, 1l, "One");
+                database.put(tx, 100000000l, "Big");
 
-                assertEquals(Arrays.asList(-100000000l, -1l, 1l, 100000000l), iteratorToList(index.keys(tx)));
+                assertEquals(Arrays.asList(-100000000l, -1l, 1l, 100000000l), iteratorToList(database.keys(tx)));
 
                 tx.commit();
             }
@@ -631,18 +630,18 @@ public class DatabaseTest {
 
     @Test
     public void canStoreFloats() {
-        try (final Database db = createDatabase()) {
-            try (final Transaction tx = db.transaction(false)) {
-                final Index<Float, String> index = db.createIndex(tx, "Test", FloatSchema.INSTANCE, StringSchema.INSTANCE);
+        try (final Environment env = createEnvironment()) {
+            try (final Transaction tx = env.transaction(false)) {
+                final Database<Float, String> database = env.createDatabase(tx, "Test", FloatSchema.INSTANCE, StringSchema.INSTANCE);
 
-                index.put(tx, Float.NEGATIVE_INFINITY, "Neg Inf");
-                index.put(tx, -100000000.0f, "Neg Big");
-                index.put(tx, -1.0f, "Neg One");
-                index.put(tx, 1.0f, "One");
-                index.put(tx, 100000000.0f, "Big");
-                index.put(tx, Float.POSITIVE_INFINITY, "Neg Inf");
+                database.put(tx, Float.NEGATIVE_INFINITY, "Neg Inf");
+                database.put(tx, -100000000.0f, "Neg Big");
+                database.put(tx, -1.0f, "Neg One");
+                database.put(tx, 1.0f, "One");
+                database.put(tx, 100000000.0f, "Big");
+                database.put(tx, Float.POSITIVE_INFINITY, "Neg Inf");
 
-                assertEquals(Arrays.asList(Float.NEGATIVE_INFINITY, -100000000.0f, -1.0f, 1.0f, 100000000.0f, Float.POSITIVE_INFINITY), iteratorToList(index.keys(tx)));
+                assertEquals(Arrays.asList(Float.NEGATIVE_INFINITY, -100000000.0f, -1.0f, 1.0f, 100000000.0f, Float.POSITIVE_INFINITY), iteratorToList(database.keys(tx)));
 
                 tx.commit();
             }
@@ -651,18 +650,18 @@ public class DatabaseTest {
 
     @Test
     public void canStoreDoubles() {
-        try (final Database db = createDatabase()) {
-            try (final Transaction tx = db.transaction(false)) {
-                final Index<Double, String> index = db.createIndex(tx, "Test", DoubleSchema.INSTANCE, StringSchema.INSTANCE);
+        try (final Environment env = createEnvironment()) {
+            try (final Transaction tx = env.transaction(false)) {
+                final Database<Double, String> database = env.createDatabase(tx, "Test", DoubleSchema.INSTANCE, StringSchema.INSTANCE);
 
-                index.put(tx, Double.NEGATIVE_INFINITY, "Neg Inf");
-                index.put(tx, -100000000.0, "Neg Big");
-                index.put(tx, -1.0, "Neg One");
-                index.put(tx, 1.0, "One");
-                index.put(tx, 100000000.0, "Big");
-                index.put(tx, Double.POSITIVE_INFINITY, "Neg Inf");
+                database.put(tx, Double.NEGATIVE_INFINITY, "Neg Inf");
+                database.put(tx, -100000000.0, "Neg Big");
+                database.put(tx, -1.0, "Neg One");
+                database.put(tx, 1.0, "One");
+                database.put(tx, 100000000.0, "Big");
+                database.put(tx, Double.POSITIVE_INFINITY, "Neg Inf");
 
-                assertEquals(Arrays.asList(Double.NEGATIVE_INFINITY, -100000000.0, -1.0, 1.0, 100000000.0, Double.POSITIVE_INFINITY), iteratorToList(index.keys(tx)));
+                assertEquals(Arrays.asList(Double.NEGATIVE_INFINITY, -100000000.0, -1.0, 1.0, 100000000.0, Double.POSITIVE_INFINITY), iteratorToList(database.keys(tx)));
 
                 tx.commit();
             }
@@ -725,15 +724,15 @@ public class DatabaseTest {
 
     @Test
     public void singleTransaction() {
-        try (final Database db = createDatabase()) {
-            try (final Transaction tx = db.transaction(false)) {
-                final Index<Integer, String> index = db.createIndex(tx, "Test", IntegerSchema.INSTANCE, StringSchema.INSTANCE);
+        try (final Environment env = createEnvironment()) {
+            try (final Transaction tx = env.transaction(false)) {
+                final Database<Integer, String> database = env.createDatabase(tx, "Test", IntegerSchema.INSTANCE, StringSchema.INSTANCE);
 
-                index.put(tx, 1, "Hello");
-                index.put(tx, 2, "World");
-                index.put(tx, 3, "!");
+                database.put(tx, 1, "Hello");
+                database.put(tx, 2, "World");
+                database.put(tx, 3, "!");
 
-                assertEquals("World", index.get(tx, 2));
+                assertEquals("World", database.get(tx, 2));
 
                 tx.commit();
             }
@@ -742,54 +741,54 @@ public class DatabaseTest {
 
     @Test
     public void doubleTransaction() {
-        try (final Database db = createDatabase()) {
-            final Index<Integer, String> index;
-            try (final Transaction tx = db.transaction(false)) {
-                index = db.createIndex(tx, "Test", IntegerSchema.INSTANCE, StringSchema.INSTANCE);
+        try (final Environment env = createEnvironment()) {
+            final Database<Integer, String> database;
+            try (final Transaction tx = env.transaction(false)) {
+                database = env.createDatabase(tx, "Test", IntegerSchema.INSTANCE, StringSchema.INSTANCE);
 
-                index.put(tx, 1, "Hello");
-                index.put(tx, 2, "World");
-                index.put(tx, 3, "!");
+                database.put(tx, 1, "Hello");
+                database.put(tx, 2, "World");
+                database.put(tx, 3, "!");
 
                 tx.commit();
             }
 
-            try (final Transaction tx = db.transaction(true)) {
-                assertEquals("World", index.get(tx, 2));
+            try (final Transaction tx = env.transaction(true)) {
+                assertEquals("World", database.get(tx, 2));
             }
         }
     }
 
     @Test
     public void doubleDatabase() {
-        final Supplier<Database> dbSupplier = prepareDatabase();
-        try (final Database db = dbSupplier.get()) {
-            try (final Transaction tx = db.transaction(false)) {
-                final Index<Integer, String> index = db.createIndex(tx, "Test", IntegerSchema.INSTANCE, StringSchema.INSTANCE);
+        final Supplier<Environment> dbSupplier = prepareEnvironment();
+        try (final Environment env = dbSupplier.get()) {
+            try (final Transaction tx = env.transaction(false)) {
+                final Database<Integer, String> database = env.createDatabase(tx, "Test", IntegerSchema.INSTANCE, StringSchema.INSTANCE);
 
-                index.put(tx, 1, "Hello");
-                index.put(tx, 2, "World");
-                index.put(tx, 3, "!");
+                database.put(tx, 1, "Hello");
+                database.put(tx, 2, "World");
+                database.put(tx, 3, "!");
 
                 tx.commit();
             }
         }
 
-        try (final Database db = dbSupplier.get()) {
-            try (final Transaction tx = db.transaction(true)) {
-                final Index<Integer, String> index = db.createIndex(tx, "Test", IntegerSchema.INSTANCE, StringSchema.INSTANCE);
+        try (final Environment env = dbSupplier.get()) {
+            try (final Transaction tx = env.transaction(true)) {
+                final Database<Integer, String> database = env.createDatabase(tx, "Test", IntegerSchema.INSTANCE, StringSchema.INSTANCE);
 
-                assertEquals("World", index.get(tx, 2));
+                assertEquals("World", database.get(tx, 2));
             }
         }
     }
 
     @Test
     public void singleCursoredTransaction() {
-        try (final Database db = createDatabase()) {
-            try (final Transaction tx = db.transaction(false)) {
-                final Index<Integer, String> index = db.createIndex(tx, "Test", IntegerSchema.INSTANCE, StringSchema.INSTANCE);
-                try (final Cursor<Integer, String> cursor = index.createCursor(tx)) {
+        try (final Environment env = createEnvironment()) {
+            try (final Transaction tx = env.transaction(false)) {
+                final Database<Integer, String> database = env.createDatabase(tx, "Test", IntegerSchema.INSTANCE, StringSchema.INSTANCE);
+                try (final Cursor<Integer, String> cursor = database.createCursor(tx)) {
                     cursor.put(1, "Hello");
                     cursor.put(2, "World");
                     cursor.put(3, "!");
@@ -806,11 +805,11 @@ public class DatabaseTest {
 
     @Test
     public void doubleCursoredTransaction() {
-        try (final Database db = createDatabase()) {
-            final Index<Integer, String> index;
-            try (final Transaction tx = db.transaction(false)) {
-                index = db.createIndex(tx, "Test", IntegerSchema.INSTANCE, StringSchema.INSTANCE);
-                try (final Cursor<Integer, String> cursor = index.createCursor(tx)) {
+        try (final Environment env = createEnvironment()) {
+            final Database<Integer, String> database;
+            try (final Transaction tx = env.transaction(false)) {
+                database = env.createDatabase(tx, "Test", IntegerSchema.INSTANCE, StringSchema.INSTANCE);
+                try (final Cursor<Integer, String> cursor = database.createCursor(tx)) {
                     cursor.put(1, "Hello");
                     cursor.put(2, "World");
                     cursor.put(3, "!");
@@ -819,8 +818,8 @@ public class DatabaseTest {
                 tx.commit();
             }
 
-            try (final Transaction tx = db.transaction(true)) {
-                try (final Cursor<Integer, String> cursor = index.createCursor(tx)) {
+            try (final Transaction tx = env.transaction(true)) {
+                try (final Cursor<Integer, String> cursor = database.createCursor(tx)) {
                     assertTrue(cursor.moveTo(2));
                     assertEquals("World", cursor.getValue());
                     assertEquals(2, cursor.getKey().longValue());
@@ -831,14 +830,14 @@ public class DatabaseTest {
 
     @Test
     public void boundedSizeKeyValues() {
-        try (final Database db = createDatabase()) {
-            try (final Transaction tx = db.transaction(false)) {
-                final Index<String, String> index = db.createIndex(tx, "Test", new Latin1StringSchema(10), new Latin1StringSchema(10));
+        try (final Environment env = createEnvironment()) {
+            try (final Transaction tx = env.transaction(false)) {
+                final Database<String, String> database = env.createDatabase(tx, "Test", new Latin1StringSchema(10), new Latin1StringSchema(10));
 
-                index.put(tx, "Hello", "World");
-                index.put(tx, "Goodbye", "Hades");
+                database.put(tx, "Hello", "World");
+                database.put(tx, "Goodbye", "Hades");
 
-                assertEquals("World", index.get(tx, "Hello"));
+                assertEquals("World", database.get(tx, "Hello"));
 
                 tx.commit();
             }
@@ -847,15 +846,15 @@ public class DatabaseTest {
 
     @Test
     public void moveCursor() {
-        try (final Database db = createDatabase()) {
-            try (final Transaction tx = db.transaction(false)) {
-                final Index<Integer, String> index = db.createIndex(tx, "Test", IntegerSchema.INSTANCE, new Latin1StringSchema(10));
+        try (final Environment env = createEnvironment()) {
+            try (final Transaction tx = env.transaction(false)) {
+                final Database<Integer, String> database = env.createDatabase(tx, "Test", IntegerSchema.INSTANCE, new Latin1StringSchema(10));
 
-                index.put(tx, 1, "World");
-                index.put(tx, 3, "Heaven");
-                index.put(tx, 5, "Hades");
+                database.put(tx, 1, "World");
+                database.put(tx, 3, "Heaven");
+                database.put(tx, 5, "Hades");
 
-                try (final Cursor<Integer, String> cursor = index.createCursor(tx)) {
+                try (final Cursor<Integer, String> cursor = database.createCursor(tx)) {
 
                     // moveFirst/moveNext/moveLast
 
@@ -959,14 +958,14 @@ public class DatabaseTest {
     @Test
     public void moveFloorWorksInParticularBuggyCase() {
         // There was a bug where keyEquals would not compare the final 1 to 7 bits of the key, so moveFloor would erroneously return true
-        try (final Database db = createDatabase()) {
-            try (final Transaction tx = db.transaction(false)) {
-                final Index<Pair<String, Integer>, String> index = db.createIndex(tx, "Test",
+        try (final Environment env = createEnvironment()) {
+            try (final Transaction tx = env.transaction(false)) {
+                final Database<Pair<String, Integer>, String> database = env.createDatabase(tx, "Test",
                         Schema.zip(new Latin1StringSchema(20), IntegerSchema.INSTANCE), new Latin1StringSchema(10));
 
-                index.put(tx, new Pair<>("foo", 5), "First0");
+                database.put(tx, new Pair<>("foo", 5), "First0");
 
-                try (final Cursor<Pair<String, Integer>, String> cursor = index.createCursor(tx)) {
+                try (final Cursor<Pair<String, Integer>, String> cursor = database.createCursor(tx)) {
                     assertFalse(cursor.moveFloor(new Pair<>("foo", 4)));
                 }
             }
@@ -975,20 +974,20 @@ public class DatabaseTest {
 
     @Test
     public void subcursorWorks() {
-        try (final Database db = createDatabase()) {
-            try (final Transaction tx = db.transaction(false)) {
-                final Index<Pair<Integer, Integer>, String> index = db.createIndex(tx, "Test",
+        try (final Environment env = createEnvironment()) {
+            try (final Transaction tx = env.transaction(false)) {
+                final Database<Pair<Integer, Integer>, String> database = env.createDatabase(tx, "Test",
                         Schema.zip(UnsignedIntegerSchema.INSTANCE, UnsignedIntegerSchema.INSTANCE), new Latin1StringSchema(10));
 
-                index.put(tx, new Pair<>(0, 0), "First0");
-                index.put(tx, new Pair<>(0, 2), "First1");
-                index.put(tx, new Pair<>(100, 0), "Middle0");
-                index.put(tx, new Pair<>(100, 2), "Middle1");
-                index.put(tx, new Pair<>(200, 100), "Singleton");
-                index.put(tx, new Pair<>(0xFFFFFFFF, 0), "Last0");
-                index.put(tx, new Pair<>(0xFFFFFFFF, 2), "Last0");
+                database.put(tx, new Pair<>(0, 0), "First0");
+                database.put(tx, new Pair<>(0, 2), "First1");
+                database.put(tx, new Pair<>(100, 0), "Middle0");
+                database.put(tx, new Pair<>(100, 2), "Middle1");
+                database.put(tx, new Pair<>(200, 100), "Singleton");
+                database.put(tx, new Pair<>(0xFFFFFFFF, 0), "Last0");
+                database.put(tx, new Pair<>(0xFFFFFFFF, 2), "Last0");
 
-                try (final Cursor<Pair<Integer, Integer>, String> cursor = index.createCursor(tx)) {
+                try (final Cursor<Pair<Integer, Integer>, String> cursor = database.createCursor(tx)) {
                     for (int a : new int[] { 0, 100, 0xFFFFFFFF }) {
                         final Cursorlike<Integer, String> subcursor = new SubcursorView<>(cursor, UnsignedIntegerSchema.INSTANCE, UnsignedIntegerSchema.INSTANCE, a);
 

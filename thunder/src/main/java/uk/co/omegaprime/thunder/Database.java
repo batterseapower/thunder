@@ -1,69 +1,279 @@
 package uk.co.omegaprime.thunder;
 
+import sun.misc.Unsafe;
 import uk.co.omegaprime.thunder.schema.Schema;
 
-import java.io.File;
+import java.util.Iterator;
 
-public class Database implements AutoCloseable {
-    final long env;
+import static uk.co.omegaprime.thunder.Bits.bitsToBytes;
+import static uk.co.omegaprime.thunder.Bits.unsafe;
 
-    public Database(File file) {
-        this(file, new DatabaseOptions());
+public class Database<K, V> {
+    final Environment db;
+    final long dbi;
+    final Schema<K> kSchema;
+    final Schema<V> vSchema;
+
+    // Used for temporary scratch storage within the context of a single method only, basically
+    // just to save some calls to the allocator. The sole reason why Database is not thread safe.
+    final long kBufferPtr, vBufferPtr;
+    final BitStream bs = new BitStream();
+
+    public Database(Environment db, long dbi, Schema<K> kSchema, Schema<V> vSchema) {
+        this.db = db;
+        this.dbi = dbi; // NB: we never mdb_dbi_close. This should be safe, and avoids Database having to be AutoCloseable
+        this.kSchema = kSchema;
+        this.vSchema = vSchema;
+
+        this.kBufferPtr = allocateSharedBufferPointer(kSchema);
+        this.vBufferPtr = allocateSharedBufferPointer(vSchema);
     }
 
-    public Database(File file, DatabaseOptions options) {
-        final long[] envPtr = new long[1];
-        Util.checkErrorCode(JNI.mdb_env_create(envPtr));
-        env = envPtr[0];
+    public Schema<K> getKeySchema()   { return kSchema; }
+    public Schema<V> getValueSchema() { return vSchema; }
 
-        Util.checkErrorCode(JNI.mdb_env_set_maxdbs(env, options.maxIndexes));
-        Util.checkErrorCode(JNI.mdb_env_set_mapsize(env, options.mapSizeBytes));
-        Util.checkErrorCode(JNI.mdb_env_set_maxreaders(env, options.maxReaders));
-
-        Util.checkErrorCode(JNI.mdb_env_open(env, file.getAbsolutePath(), options.flags, options.createPermissions));
+    private static <T> long allocateSharedBufferPointer(Schema<T> schema) {
+        if (schema.maximumSizeBits() < 0) {
+            // TODO: speculatively allocate a reasonable amount of memory that most allocations of interest might fit into?
+            return 0;
+        } else {
+            return allocateBufferPointer(0, bitsToBytes(schema.maximumSizeBits()));
+        }
     }
 
-    public void setMetaSync(boolean enabled) { Util.checkErrorCode(JNI.mdb_env_set_flags(env, JNI.MDB_NOMETASYNC, enabled ? 0 : 1)); }
-    public void setSync    (boolean enabled) { Util.checkErrorCode(JNI.mdb_env_set_flags(env, JNI.MDB_NOSYNC,     enabled ? 0 : 1)); }
-    public void setMapSync (boolean enabled) { Util.checkErrorCode(JNI.mdb_env_set_flags(env, JNI.MDB_MAPASYNC,   enabled ? 0 : 1)); }
-
-    public void sync(boolean force) { Util.checkErrorCode(JNI.mdb_env_sync(env, force ? 1 : 0)); }
-
-    public <K, V> Index<K, V> index(Transaction tx, String name, Schema<K> kSchema, Schema<V> vSchema) {
-        return index(tx, name, kSchema, vSchema, false);
-    }
-    public <K, V> Index<K, V> createIndex(Transaction tx, String name, Schema<K> kSchema, Schema<V> vSchema) {
-        return index(tx, name, kSchema, vSchema, true);
-    }
-    public <K, V> Index<K, V> index(Transaction tx, String name, Schema<K> kSchema, Schema<V> vSchema, boolean allowCreation) {
-        final long[] dbiPtr = new long[1];
-        Util.checkErrorCode(JNI.mdb_dbi_open(tx.txn, name, allowCreation ? JNI.MDB_CREATE : 0, dbiPtr));
-        return new Index<>(this, dbiPtr[0], kSchema, vSchema);
+    private static void freeSharedBufferPointer(long bufferPtr) {
+        if (bufferPtr != 0) {
+            unsafe.freeMemory(bufferPtr);
+        }
     }
 
-    public <K, V> IndexWithDuplicateKeys<K, V> indexWithDuplicateKeys(Transaction tx, String name, Schema<K> kSchema, Schema<V> vSchema) {
-        return indexWithDuplicateKeys(tx, name, kSchema, vSchema, false);
-    }
-    public <K, V> IndexWithDuplicateKeys<K, V> createIndexWithDuplicateKeys(Transaction tx, String name, Schema<K> kSchema, Schema<V> vSchema) {
-        return indexWithDuplicateKeys(tx, name, kSchema, vSchema, true);
-    }
-    public <K, V> IndexWithDuplicateKeys<K, V> indexWithDuplicateKeys(Transaction tx, String name, Schema<K> kSchema, Schema<V> vSchema, boolean allowCreation) {
-        final long[] dbiPtr = new long[1];
-        Util.checkErrorCode(JNI.mdb_dbi_open(tx.txn, name, JNI.MDB_DUPSORT | (allowCreation ? JNI.MDB_CREATE : 0), dbiPtr));
-        return new IndexWithDuplicateKeys<>(this, dbiPtr[0], kSchema, vSchema);
+    // INVARIANT: sz == schema.size(x)
+    protected <T> void fillBufferPointerFromSchema(Schema<T> schema, long bufferPtr, int sz, T x) {
+        unsafe.putAddress(bufferPtr, sz);
+        unsafe.putAddress(bufferPtr + Unsafe.ADDRESS_SIZE, bufferPtr + 2 * Unsafe.ADDRESS_SIZE);
+        bs.initialize(bufferPtr + 2 * Unsafe.ADDRESS_SIZE, sz);
+        schema.write(bs, x);
+        bs.zeroFill();
     }
 
-    // Quoth the docs:
-    //   A transaction and its cursors must only be used by a single
-    //   thread, and a thread may only have a single transaction at a time.
-    //   If #MDB_NOTLS is in use, this does not apply to read-only transactions.
-    public Transaction transaction(boolean isReadOnly) {
-        final long[] txnPtr = new long[1];
-        Util.checkErrorCode(JNI.mdb_txn_begin(env, 0, isReadOnly ? JNI.MDB_RDONLY : 0, txnPtr));
-        return new Transaction(txnPtr[0]);
+    protected static long allocateBufferPointer(long bufferPtr, int sz) {
+        if (bufferPtr != 0) {
+            return bufferPtr;
+        } else {
+            return unsafe.allocateMemory(2 * Unsafe.ADDRESS_SIZE + sz);
+        }
     }
 
-    public void close() {
-        JNI.mdb_env_close(env);
+    protected static long allocateAndCopyBufferPointer(long bufferPtr, long bufferPtrToCopy) {
+        int sz = (int)unsafe.getAddress(bufferPtrToCopy);
+        long bufferPtrNow = Database.allocateBufferPointer(bufferPtr, sz);
+        unsafe.putAddress(bufferPtrNow,                       sz);
+        unsafe.putAddress(bufferPtrNow + Unsafe.ADDRESS_SIZE, bufferPtr + 2 * Unsafe.ADDRESS_SIZE);
+        unsafe.copyMemory(unsafe.getAddress(bufferPtrToCopy + Unsafe.ADDRESS_SIZE), bufferPtr + 2 * Unsafe.ADDRESS_SIZE, sz);
+        return bufferPtrNow;
+    }
+
+    protected static void freeBufferPointer(long bufferPtr, long bufferPtrNow) {
+        if (bufferPtr == 0) {
+            unsafe.freeMemory(bufferPtrNow);
+        }
+    }
+
+    public Cursor<K, V> createCursor(Transaction tx) {
+        final long[] cursorPtr = new long[1];
+        Util.checkErrorCode(JNI.mdb_cursor_open(tx.txn, dbi, cursorPtr));
+        return new Cursor<>(this, tx, cursorPtr[0]);
+    }
+
+    @Override
+    public void finalize() throws Throwable {
+        freeSharedBufferPointer(kBufferPtr);
+        freeSharedBufferPointer(vBufferPtr);
+        super.finalize();
+    }
+
+    public void put(Transaction tx, K k, V v) {
+        final int kSz = bitsToBytes(kSchema.sizeBits(k));
+        final int vSz = bitsToBytes(vSchema.sizeBits(v));
+
+        final long kBufferPtrNow = allocateBufferPointer(kBufferPtr, kSz);
+        fillBufferPointerFromSchema(kSchema, kBufferPtrNow, kSz, k);
+        final long vBufferPtrNow = allocateBufferPointer(vBufferPtr, vSz);
+        unsafe.putAddress(vBufferPtrNow, vSz);
+        try {
+            Util.checkErrorCode(JNI.mdb_put(tx.txn, dbi, kBufferPtrNow, vBufferPtrNow, JNI.MDB_RESERVE));
+            assert(unsafe.getAddress(vBufferPtrNow) == vSz);
+            bs.initialize(unsafe.getAddress(vBufferPtrNow + Unsafe.ADDRESS_SIZE), vSz);
+            vSchema.write(bs, v);
+            bs.zeroFill();
+        } finally {
+            freeBufferPointer(vBufferPtr, vBufferPtrNow);
+            freeBufferPointer(kBufferPtr, kBufferPtrNow);
+            tx.generation++;
+        }
+    }
+
+    public V putIfAbsent(Transaction tx, K k, V v) {
+        final int kSz = bitsToBytes(kSchema.sizeBits(k));
+        final int vSz = bitsToBytes(vSchema.sizeBits(v));
+
+        final long kBufferPtrNow = allocateBufferPointer(kBufferPtr, kSz);
+        fillBufferPointerFromSchema(kSchema, kBufferPtrNow, kSz, k);
+        final long vBufferPtrNow = allocateBufferPointer(vBufferPtr, vSz);
+        fillBufferPointerFromSchema(vSchema, vBufferPtrNow, vSz, v);
+        try {
+            int rc = JNI.mdb_put(tx.txn, dbi, kBufferPtrNow, vBufferPtrNow, JNI.MDB_RESERVE | JNI.MDB_NOOVERWRITE);
+            if (rc == JNI.MDB_KEYEXIST) {
+                bs.initialize(unsafe.getAddress(vBufferPtrNow + Unsafe.ADDRESS_SIZE), (int)unsafe.getAddress(vBufferPtrNow));
+                return vSchema.read(bs);
+            } else {
+                Util.checkErrorCode(rc);
+                assert(unsafe.getAddress(vBufferPtrNow) == vSz);
+                bs.initialize(unsafe.getAddress(vBufferPtrNow + Unsafe.ADDRESS_SIZE), vSz);
+                vSchema.write(bs, v);
+                bs.zeroFill();
+                return null;
+            }
+        } finally {
+            freeBufferPointer(vBufferPtr, vBufferPtrNow);
+            freeBufferPointer(kBufferPtr, kBufferPtrNow);
+            tx.generation++;
+        }
+    }
+
+    public boolean remove(Transaction tx, K k) {
+        final int kSz = bitsToBytes(kSchema.sizeBits(k));
+
+        final long kBufferPtrNow = allocateBufferPointer(kBufferPtr, kSz);
+        fillBufferPointerFromSchema(kSchema, kBufferPtrNow, kSz, k);
+        try {
+            int rc = JNI.mdb_del(tx.txn, dbi, kBufferPtrNow, 0);
+            if (rc == JNI.MDB_NOTFOUND) {
+                return false;
+            } else {
+                Util.checkErrorCode(rc);
+                return true;
+            }
+        } finally {
+            freeBufferPointer(kBufferPtr, kBufferPtrNow);
+            tx.generation++;
+        }
+    }
+
+    public V get(Transaction tx, K k) {
+        final int kSz = bitsToBytes(kSchema.sizeBits(k));
+
+        final long kBufferPtrNow = allocateBufferPointer(kBufferPtr, kSz);
+        fillBufferPointerFromSchema(kSchema, kBufferPtrNow, kSz, k);
+        final long vBufferPtrNow = allocateBufferPointer(vBufferPtr, 0);
+        try {
+            int rc = JNI.mdb_get(tx.txn, dbi, kBufferPtrNow, vBufferPtrNow);
+            if (rc == JNI.MDB_NOTFOUND) {
+                return null;
+            } else {
+                Util.checkErrorCode(rc);
+                bs.initialize(unsafe.getAddress(vBufferPtrNow + Unsafe.ADDRESS_SIZE), (int) unsafe.getAddress(vBufferPtrNow));
+                return vSchema.read(bs);
+            }
+        } finally {
+            freeBufferPointer(vBufferPtr, vBufferPtrNow);
+            freeBufferPointer(kBufferPtr, kBufferPtrNow);
+        }
+    }
+
+    public boolean contains(Transaction tx, K k) {
+        final int kSz = bitsToBytes(kSchema.sizeBits(k));
+
+        final long kBufferPtrNow = allocateBufferPointer(kBufferPtr, kSz);
+        fillBufferPointerFromSchema(kSchema, kBufferPtrNow, kSz, k);
+        final long vBufferPtrNow = allocateBufferPointer(vBufferPtr, 0);
+        try {
+            int rc = JNI.mdb_get(tx.txn, dbi, kBufferPtrNow, vBufferPtrNow);
+            if (rc == JNI.MDB_NOTFOUND) {
+                return false;
+            } else {
+                Util.checkErrorCode(rc);
+                return true;
+            }
+        } finally {
+            freeBufferPointer(vBufferPtr, vBufferPtrNow);
+            freeBufferPointer(kBufferPtr, kBufferPtrNow);
+        }
+    }
+
+    public Iterator<K> keys(Transaction tx) {
+        final Cursor<K, V> cursor = createCursor(tx);
+        final boolean initialHasNext = cursor.moveFirst();
+        return new Iterator<K>() {
+            boolean hasNext = initialHasNext;
+
+            public boolean hasNext() {
+                return hasNext;
+            }
+
+            @Override
+            public K next() {
+                if (!hasNext) throw new IllegalStateException("No more elements");
+
+                final K key = cursor.getKey();
+                hasNext = cursor.moveNext();
+                if (!hasNext) {
+                    cursor.close();
+                }
+                return key;
+            }
+        };
+    }
+
+    public Iterator<V> values(Transaction tx) {
+        final Cursor<K, V> cursor = createCursor(tx);
+        final boolean initialHasNext = cursor.moveFirst();
+        return new Iterator<V>() {
+            boolean hasNext = initialHasNext;
+
+            public boolean hasNext() {
+                return hasNext;
+            }
+
+            @Override
+            public V next() {
+                if (!hasNext) throw new IllegalStateException("No more elements");
+
+                final V value = cursor.getValue();
+                hasNext = cursor.moveNext();
+                if (!hasNext) {
+                    cursor.close();
+                }
+                return value;
+            }
+        };
+    }
+
+    public Iterator<Pair<K, V>> keyValues(Transaction tx) {
+        final Cursor<K, V> cursor = createCursor(tx);
+        final boolean initialHasNext = cursor.moveFirst();
+        return new Iterator<Pair<K, V>>() {
+            boolean hasNext = initialHasNext;
+
+            public boolean hasNext() {
+                return hasNext;
+            }
+
+            @Override
+            public Pair<K, V> next() {
+                if (!hasNext) throw new IllegalStateException("No more elements");
+
+                final Pair<K, V> pair = new Pair<>(cursor.getKey(), cursor.getValue());
+                hasNext = cursor.moveNext();
+                if (!hasNext) {
+                    cursor.close();
+                }
+                return pair;
+            }
+        };
+    }
+
+    public <K2, V2> Database<K2, V2> reinterpretView(Schema<K2> k2Schema, Schema<V2> v2Schema) {
+        return new Database<>(db, dbi, k2Schema, v2Schema);
     }
 }

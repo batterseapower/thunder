@@ -63,16 +63,16 @@ public class SubcursorView<K1, K2, V> implements Cursorlike<K2, V> {
 
     public void setPosition(K1 k1) {
         // Bit of a hack here unfortunately...
-        final Index<?, ?> index = cursor.getIndex();
+        final Database<?, ?> database = cursor.getDatabase();
         final int k1Sz = bitsToBytes(k1Schema.sizeBits(k1));
-        final long aBufferPtrNow = Index.allocateBufferPointer(index.kBufferPtr, k1Sz);
+        final long aBufferPtrNow = Database.allocateBufferPointer(database.kBufferPtr, k1Sz);
         try {
-            index.bs.initialize(aBufferPtrNow + 2 * Unsafe.ADDRESS_SIZE, k1Sz);
-            final long mark = index.bs.mark();
-            k1Schema.write(index.bs, k1);
-            k1IsMaximum = index.bs.incrementBitStreamFromMark(mark);
+            database.bs.initialize(aBufferPtrNow + 2 * Unsafe.ADDRESS_SIZE, k1Sz);
+            final long mark = database.bs.mark();
+            k1Schema.write(database.bs, k1);
+            k1IsMaximum = database.bs.incrementBitStreamFromMark(mark);
         } finally {
-            Index.freeBufferPointer(index.kBufferPtr, aBufferPtrNow);
+            Database.freeBufferPointer(database.kBufferPtr, aBufferPtrNow);
         }
 
         this.k1 = k1;
@@ -158,7 +158,7 @@ public class SubcursorView<K1, K2, V> implements Cursorlike<K2, V> {
     @Override public Schema<V> getValueSchema() { return cursor.getValueSchema(); }
 
     @Override
-    public Index<?, ?> getIndex() { return cursor.getIndex(); }
+    public Database<?, ?> getDatabase() { return cursor.getDatabase(); }
 
     /*
     public <C, D> SubcursorView<Pair<K1, C>, D, V> subcursorView(Schema<C> cSchema, Schema<D> dSchema, final C c) {

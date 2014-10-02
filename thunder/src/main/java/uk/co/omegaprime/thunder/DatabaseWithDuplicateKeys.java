@@ -6,8 +6,8 @@ import java.util.Iterator;
 
 import static uk.co.omegaprime.thunder.Bits.bitsToBytes;
 
-public class IndexWithDuplicateKeys<K, V> extends Index<K, V> {
-    public IndexWithDuplicateKeys(Database db, long dbi, Schema<K> kSchema, Schema<V> vSchema) {
+public class DatabaseWithDuplicateKeys<K, V> extends Database<K, V> {
+    public DatabaseWithDuplicateKeys(Environment db, long dbi, Schema<K> kSchema, Schema<V> vSchema) {
         super(db, dbi, kSchema, vSchema);
     }
 

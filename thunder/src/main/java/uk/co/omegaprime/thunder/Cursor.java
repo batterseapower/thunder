@@ -8,11 +8,11 @@ import static uk.co.omegaprime.thunder.Bits.unsafe;
 
 // XXX: type specialisation for true 0-allocation? But we might hope that escape analysis would save us because our boxes are intermediate only.
 public class Cursor<K, V> implements Cursorlike<K,V>, AutoCloseable {
-    final Index<K, V> index;
+    final Database<K, V> database;
     final Transaction tx;
     final long cursor;
 
-    // Unlike the bufferPtrs in Index, it is important the the state of this var persists across calls:
+    // Unlike the bufferPtrs in Database, it is important the the state of this var persists across calls:
     // it basically holds info about what the cursor is currently pointing to.
     //
     // If bufferPtrGeneration is different from the current transaction generation then the contents of this buffer
@@ -32,12 +32,12 @@ public class Cursor<K, V> implements Cursorlike<K,V>, AutoCloseable {
 
     final Shared shared;
 
-    public Cursor(Index<K, V> index, Transaction tx, long cursor) {
-        this(index, tx, cursor, new Shared(tx));
+    public Cursor(Database<K, V> database, Transaction tx, long cursor) {
+        this(database, tx, cursor, new Shared(tx));
     }
 
-    private Cursor(Index<K, V> index, Transaction tx, long cursor, Shared shared) {
-        this.index = index;
+    private Cursor(Database<K, V> database, Transaction tx, long cursor, Shared shared) {
+        this.database = database;
         this.tx = tx;
         this.cursor = cursor;
         this.shared = shared;
@@ -72,10 +72,10 @@ public class Cursor<K, V> implements Cursorlike<K,V>, AutoCloseable {
     protected boolean refreshBufferPtr() { return shared.bufferPtrGeneration == tx.generation || move(JNI.MDB_GET_CURRENT); }
 
     private boolean move(K k, int op) {
-        final int kSz = bitsToBytes(index.kSchema.sizeBits(k));
+        final int kSz = bitsToBytes(database.kSchema.sizeBits(k));
 
-        final long kBufferPtrNow = Index.allocateBufferPointer(index.kBufferPtr, kSz);
-        index.fillBufferPointerFromSchema(index.kSchema, kBufferPtrNow, kSz, k);
+        final long kBufferPtrNow = Database.allocateBufferPointer(database.kBufferPtr, kSz);
+        database.fillBufferPointerFromSchema(database.kSchema, kBufferPtrNow, kSz, k);
         try {
             return isFound(JNI.mdb_cursor_get(cursor, kBufferPtrNow, shared.bufferPtr + 2 * Unsafe.ADDRESS_SIZE, op));
         } finally {
@@ -83,7 +83,7 @@ public class Cursor<K, V> implements Cursorlike<K,V>, AutoCloseable {
             unsafe.putAddress(shared.bufferPtr,                       unsafe.getAddress(kBufferPtrNow));
             unsafe.putAddress(shared.bufferPtr + Unsafe.ADDRESS_SIZE, unsafe.getAddress(kBufferPtrNow + Unsafe.ADDRESS_SIZE));
             shared.bufferPtrGeneration = tx.generation;
-            Index.freeBufferPointer(index.kBufferPtr, kBufferPtrNow);
+            Database.freeBufferPointer(database.kBufferPtr, kBufferPtrNow);
         }
     }
 
@@ -95,15 +95,15 @@ public class Cursor<K, V> implements Cursorlike<K,V>, AutoCloseable {
     }
 
     protected boolean keyEquals(K k) {
-        return keyValueEquals(k, 0, index.kSchema, index.kBufferPtr, false);
+        return keyValueEquals(k, 0, database.kSchema, database.kBufferPtr, false);
     }
 
     protected boolean keyStartsWith(K k) {
-        return keyValueEquals(k, 0, index.kSchema, index.kBufferPtr, true);
+        return keyValueEquals(k, 0, database.kSchema, database.kBufferPtr, true);
     }
 
     protected boolean valueEquals(V v) {
-        return keyValueEquals(v, 2 * Unsafe.ADDRESS_SIZE, index.vSchema, index.vBufferPtr, false);
+        return keyValueEquals(v, 2 * Unsafe.ADDRESS_SIZE, database.vSchema, database.vBufferPtr, false);
     }
 
     private <T> boolean keyValueEquals(T kv, int byteOffsetFromBufferPtr, Schema<T> schema, long scratchBufferPtr, boolean allowOurValueToBeAPrefix) {
@@ -117,8 +117,8 @@ public class Cursor<K, V> implements Cursorlike<K,V>, AutoCloseable {
             return false;
         }
 
-        final long bufferPtrNow = Index.allocateBufferPointer(scratchBufferPtr, sz);
-        index.fillBufferPointerFromSchema(schema, bufferPtrNow, sz, kv);
+        final long bufferPtrNow = Database.allocateBufferPointer(scratchBufferPtr, sz);
+        database.fillBufferPointerFromSchema(schema, bufferPtrNow, sz, kv);
         try {
             final long ourPtr   = unsafe.getAddress(shared.bufferPtr + byteOffsetFromBufferPtr + Unsafe.ADDRESS_SIZE);
             final long theirPtr = bufferPtrNow + 2 * Unsafe.ADDRESS_SIZE;
@@ -139,94 +139,94 @@ public class Cursor<K, V> implements Cursorlike<K,V>, AutoCloseable {
 
             return true;
         } finally {
-            Index.freeBufferPointer(scratchBufferPtr, bufferPtrNow);
+            Database.freeBufferPointer(scratchBufferPtr, bufferPtrNow);
         }
     }
 
     @Override
     public K getKey() {
         refreshBufferPtr();
-        index.bs.initialize(unsafe.getAddress(shared.bufferPtr + Unsafe.ADDRESS_SIZE), (int)unsafe.getAddress(shared.bufferPtr));
-        return index.kSchema.read(index.bs);
+        database.bs.initialize(unsafe.getAddress(shared.bufferPtr + Unsafe.ADDRESS_SIZE), (int)unsafe.getAddress(shared.bufferPtr));
+        return database.kSchema.read(database.bs);
     }
 
     @Override
     public V getValue() {
         refreshBufferPtr();
-        index.bs.initialize(unsafe.getAddress(shared.bufferPtr + 3 * Unsafe.ADDRESS_SIZE), (int)unsafe.getAddress(shared.bufferPtr + 2 * Unsafe.ADDRESS_SIZE));
-        return index.vSchema.read(index.bs);
+        database.bs.initialize(unsafe.getAddress(shared.bufferPtr + 3 * Unsafe.ADDRESS_SIZE), (int)unsafe.getAddress(shared.bufferPtr + 2 * Unsafe.ADDRESS_SIZE));
+        return database.vSchema.read(database.bs);
     }
 
     @Override
     public void put(V v) {
         refreshBufferPtr();
 
-        final int vSz = bitsToBytes(index.vSchema.sizeBits(v));
+        final int vSz = bitsToBytes(database.vSchema.sizeBits(v));
 
         // You might think we could just reuse the existing key in bufferPtr (that we know to be correct).
         // Unfortunately we have to copy the key into a fresh buffer and give that to mdb_cursor_put instead.
         // Reason: the pointers in bufferPtr generally come from mdb_get, and as the docs state "Values returned
         // from the database are valid only until a subsequent update operation, or the end of the transaction".
         // In particular I found that trying to use them as an *input* to an update operation causes DB corruption.
-        final long kBufferPtrNow = Index.allocateAndCopyBufferPointer(index.kBufferPtr, shared.bufferPtr);
+        final long kBufferPtrNow = Database.allocateAndCopyBufferPointer(database.kBufferPtr, shared.bufferPtr);
         try {
             unsafe.putAddress(shared.bufferPtr + 2 * Unsafe.ADDRESS_SIZE, vSz);
             Util.checkErrorCode(JNI.mdb_cursor_put(cursor, kBufferPtrNow, shared.bufferPtr + 2 * Unsafe.ADDRESS_SIZE, JNI.MDB_CURRENT | JNI.MDB_RESERVE));
-            index.bs.initialize(unsafe.getAddress(shared.bufferPtr + 3 * Unsafe.ADDRESS_SIZE), vSz);
-            index.vSchema.write(index.bs, v);
-            index.bs.zeroFill();
+            database.bs.initialize(unsafe.getAddress(shared.bufferPtr + 3 * Unsafe.ADDRESS_SIZE), vSz);
+            database.vSchema.write(database.bs, v);
+            database.bs.zeroFill();
         } finally {
-            Index.freeBufferPointer(index.kBufferPtr, kBufferPtrNow);
+            Database.freeBufferPointer(database.kBufferPtr, kBufferPtrNow);
             tx.generation++;
         }
     }
 
-    // This method has a lot in common with Index.put. LMDB actually just implements mdb_put using mdb_cursor_put, so this makes sense!
+    // This method has a lot in common with Database.put. LMDB actually just implements mdb_put using mdb_cursor_put, so this makes sense!
     @Override
     public void put(K k, V v) {
-        final int kSz = bitsToBytes(index.kSchema.sizeBits(k));
-        final int vSz = bitsToBytes(index.vSchema.sizeBits(v));
+        final int kSz = bitsToBytes(database.kSchema.sizeBits(k));
+        final int vSz = bitsToBytes(database.vSchema.sizeBits(v));
 
-        final long kBufferPtrNow = Index.allocateBufferPointer(index.kBufferPtr, kSz);
-        index.fillBufferPointerFromSchema(index.kSchema, kBufferPtrNow, kSz, k);
-        final long vBufferPtrNow = Index.allocateBufferPointer(index.vBufferPtr, vSz);
+        final long kBufferPtrNow = Database.allocateBufferPointer(database.kBufferPtr, kSz);
+        database.fillBufferPointerFromSchema(database.kSchema, kBufferPtrNow, kSz, k);
+        final long vBufferPtrNow = Database.allocateBufferPointer(database.vBufferPtr, vSz);
         unsafe.putAddress(vBufferPtrNow, vSz);
         try {
             Util.checkErrorCode(JNI.mdb_cursor_put(cursor, kBufferPtrNow, vBufferPtrNow, JNI.MDB_RESERVE));
-            index.bs.initialize(unsafe.getAddress(vBufferPtrNow + Unsafe.ADDRESS_SIZE), vSz);
-            index.vSchema.write(index.bs, v);
-            index.bs.zeroFill();
+            database.bs.initialize(unsafe.getAddress(vBufferPtrNow + Unsafe.ADDRESS_SIZE), vSz);
+            database.vSchema.write(database.bs, v);
+            database.bs.zeroFill();
         } finally {
-            Index.freeBufferPointer(index.vBufferPtr, vBufferPtrNow);
-            Index.freeBufferPointer(index.kBufferPtr, kBufferPtrNow);
+            Database.freeBufferPointer(database.vBufferPtr, vBufferPtrNow);
+            Database.freeBufferPointer(database.kBufferPtr, kBufferPtrNow);
             tx.generation++;
         }
     }
 
     @Override
     public V putIfAbsent(K k, V v) {
-        final int kSz = bitsToBytes(index.kSchema.sizeBits(k));
-        final int vSz = bitsToBytes(index.vSchema.sizeBits(v));
+        final int kSz = bitsToBytes(database.kSchema.sizeBits(k));
+        final int vSz = bitsToBytes(database.vSchema.sizeBits(v));
 
-        final long kBufferPtrNow = Index.allocateBufferPointer(index.kBufferPtr, kSz);
-        index.fillBufferPointerFromSchema(index.kSchema, kBufferPtrNow, kSz, k);
-        final long vBufferPtrNow = Index.allocateBufferPointer(index.vBufferPtr, vSz);
+        final long kBufferPtrNow = Database.allocateBufferPointer(database.kBufferPtr, kSz);
+        database.fillBufferPointerFromSchema(database.kSchema, kBufferPtrNow, kSz, k);
+        final long vBufferPtrNow = Database.allocateBufferPointer(database.vBufferPtr, vSz);
         unsafe.putAddress(vBufferPtrNow, vSz);
         try {
             final int rc = JNI.mdb_cursor_put(cursor, kBufferPtrNow, vBufferPtrNow, JNI.MDB_RESERVE | JNI.MDB_NOOVERWRITE);
             if (rc == JNI.MDB_KEYEXIST) {
-                index.bs.initialize(unsafe.getAddress(vBufferPtrNow + Unsafe.ADDRESS_SIZE), (int)unsafe.getAddress(vBufferPtrNow));
-                return index.vSchema.read(index.bs);
+                database.bs.initialize(unsafe.getAddress(vBufferPtrNow + Unsafe.ADDRESS_SIZE), (int)unsafe.getAddress(vBufferPtrNow));
+                return database.vSchema.read(database.bs);
             } else {
                 Util.checkErrorCode(rc);
-                index.bs.initialize(unsafe.getAddress(vBufferPtrNow + Unsafe.ADDRESS_SIZE), vSz);
-                index.vSchema.write(index.bs, v);
-                index.bs.zeroFill();
+                database.bs.initialize(unsafe.getAddress(vBufferPtrNow + Unsafe.ADDRESS_SIZE), vSz);
+                database.vSchema.write(database.bs, v);
+                database.bs.zeroFill();
                 return null;
             }
         } finally {
-            Index.freeBufferPointer(index.vBufferPtr, vBufferPtrNow);
-            Index.freeBufferPointer(index.kBufferPtr, kBufferPtrNow);
+            Database.freeBufferPointer(database.vBufferPtr, vBufferPtrNow);
+            Database.freeBufferPointer(database.kBufferPtr, kBufferPtrNow);
             tx.generation++;
         }
     }
@@ -246,12 +246,12 @@ public class Cursor<K, V> implements Cursorlike<K,V>, AutoCloseable {
 
     public <K2, V2> Cursor<K2, V2> reinterpretView(Schema<K2> k2Schema, Schema<V2> v2Schema) {
         // It is because both this method and close exist that we need to ref count the buffer:
-        return new Cursor<>(index.reinterpretView(k2Schema, v2Schema), tx, cursor, shared);
+        return new Cursor<>(database.reinterpretView(k2Schema, v2Schema), tx, cursor, shared);
     }
 
-    @Override public Schema<K> getKeySchema()   { return index.getKeySchema(); }
-    @Override public Schema<V> getValueSchema() { return index.getValueSchema(); }
+    @Override public Schema<K> getKeySchema()   { return database.getKeySchema(); }
+    @Override public Schema<V> getValueSchema() { return database.getValueSchema(); }
 
     @Override
-    public Index<K, V> getIndex() { return index; }
+    public Database<K, V> getDatabase() { return database; }
 }
