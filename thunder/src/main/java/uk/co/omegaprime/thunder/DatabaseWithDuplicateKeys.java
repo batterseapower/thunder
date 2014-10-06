@@ -23,15 +23,15 @@ public class DatabaseWithDuplicateKeys<K, V> extends Database<K, V> {
         final int kSz = bitsToBytes(kSchema.sizeBits(k));
         final int vSz = bitsToBytes(vSchema.sizeBits(v));
 
-        final long kBufferPtrNow = allocateBufferPointer(kBufferPtr, kSz);
+        final long kBufferPtrNow = kBuffer.allocate(kSz);
         fillBufferPointerFromSchema(kSchema, kBufferPtrNow, kSz, k);
-        final long vBufferPtrNow = allocateBufferPointer(vBufferPtr, vSz);
+        final long vBufferPtrNow = vBuffer.allocate(vSz);
         fillBufferPointerFromSchema(vSchema, vBufferPtrNow, vSz, v);
         try {
             Util.checkErrorCode(JNI.mdb_put(tx.txn, dbi, kBufferPtrNow, vBufferPtrNow, 0));
         } finally {
-            freeBufferPointer(vBufferPtr, vBufferPtrNow);
-            freeBufferPointer(kBufferPtr, kBufferPtrNow);
+            vBuffer.free(vBufferPtrNow);
+            kBuffer.free(kBufferPtrNow);
             tx.generation++;
         }
     }
@@ -42,9 +42,9 @@ public class DatabaseWithDuplicateKeys<K, V> extends Database<K, V> {
         final int kSz = bitsToBytes(kSchema.sizeBits(k));
         final int vSz = bitsToBytes(vSchema.sizeBits(v));
 
-        final long kBufferPtrNow = allocateBufferPointer(kBufferPtr, kSz);
+        final long kBufferPtrNow = kBuffer.allocate(kSz);
         fillBufferPointerFromSchema(kSchema, kBufferPtrNow, kSz, k);
-        final long vBufferPtrNow = allocateBufferPointer(vBufferPtr, vSz);
+        final long vBufferPtrNow = vBuffer.allocate(vSz);
         fillBufferPointerFromSchema(vSchema, vBufferPtrNow, vSz, v);
         try {
             final int rc = JNI.mdb_put(tx.txn, dbi, kBufferPtrNow, vBufferPtrNow, JNI.MDB_NODUPDATA);
@@ -55,8 +55,8 @@ public class DatabaseWithDuplicateKeys<K, V> extends Database<K, V> {
                 return null;
             }
         } finally {
-            freeBufferPointer(vBufferPtr, vBufferPtrNow);
-            freeBufferPointer(kBufferPtr, kBufferPtrNow);
+            vBuffer.free(vBufferPtrNow);
+            kBuffer.free(kBufferPtrNow);
             tx.generation++;
         }
     }
@@ -65,9 +65,9 @@ public class DatabaseWithDuplicateKeys<K, V> extends Database<K, V> {
         final int kSz = bitsToBytes(kSchema.sizeBits(k));
         final int vSz = bitsToBytes(vSchema.sizeBits(v));
 
-        final long kBufferPtrNow = allocateBufferPointer(kBufferPtr, kSz);
+        final long kBufferPtrNow = kBuffer.allocate(kSz);
         fillBufferPointerFromSchema(kSchema, kBufferPtrNow, kSz, k);
-        final long vBufferPtrNow = allocateBufferPointer(vBufferPtr, vSz);
+        final long vBufferPtrNow = vBuffer.allocate(vSz);
         fillBufferPointerFromSchema(vSchema, vBufferPtrNow, vSz, v);
         try {
             int rc = JNI.mdb_del(tx.txn, dbi, kBufferPtrNow, vBufferPtrNow);
@@ -78,8 +78,8 @@ public class DatabaseWithDuplicateKeys<K, V> extends Database<K, V> {
                 return true;
             }
         } finally {
-            freeBufferPointer(vBufferPtr, vBufferPtrNow);
-            freeBufferPointer(kBufferPtr, kBufferPtrNow);
+            vBuffer.free(vBufferPtrNow);
+            kBuffer.free(kBufferPtrNow);
             tx.generation++;
         }
     }

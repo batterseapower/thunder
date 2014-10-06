@@ -38,9 +38,9 @@ public class CursorWithDuplicateKeys<K, V> extends Cursor<K, V> implements AutoC
         final int kSz = bitsToBytes(database.kSchema.sizeBits(k));
         final int vSz = bitsToBytes(database.vSchema.sizeBits(v));
 
-        final long kBufferPtrNow = Database.allocateBufferPointer(database.kBufferPtr, kSz);
+        final long kBufferPtrNow = database.kBuffer.allocate(kSz);
         database.fillBufferPointerFromSchema(database.kSchema, kBufferPtrNow, kSz, k);
-        final long vBufferPtrNow = Database.allocateBufferPointer(database.vBufferPtr, vSz);
+        final long vBufferPtrNow = database.vBuffer.allocate(vSz);
         database.fillBufferPointerFromSchema(database.vSchema, vBufferPtrNow, vSz, v);
         try {
             return isFound(JNI.mdb_cursor_get(cursor, kBufferPtrNow, vBufferPtrNow, op));
@@ -50,7 +50,7 @@ public class CursorWithDuplicateKeys<K, V> extends Cursor<K, V> implements AutoC
             unsafe.putAddress(shared.bufferPtr +     Unsafe.ADDRESS_SIZE, unsafe.getAddress(kBufferPtrNow + Unsafe.ADDRESS_SIZE));
             unsafe.putAddress(shared.bufferPtr + 2 * Unsafe.ADDRESS_SIZE, unsafe.getAddress(vBufferPtrNow));
             unsafe.putAddress(shared.bufferPtr + 3 * Unsafe.ADDRESS_SIZE, unsafe.getAddress(vBufferPtrNow + Unsafe.ADDRESS_SIZE));
-            Database.freeBufferPointer(database.kBufferPtr, kBufferPtrNow);
+            database.kBuffer.free(kBufferPtrNow);
             shared.bufferPtrGeneration = tx.generation;
         }
     }
@@ -61,15 +61,15 @@ public class CursorWithDuplicateKeys<K, V> extends Cursor<K, V> implements AutoC
         final int kSz = bitsToBytes(database.kSchema.sizeBits(k));
         final int vSz = bitsToBytes(database.vSchema.sizeBits(v));
 
-        final long kBufferPtrNow = Database.allocateBufferPointer(database.kBufferPtr, kSz);
+        final long kBufferPtrNow = database.kBuffer.allocate(kSz);
         database.fillBufferPointerFromSchema(database.kSchema, kBufferPtrNow, kSz, k);
-        final long vBufferPtrNow = Database.allocateBufferPointer(database.vBufferPtr, vSz);
+        final long vBufferPtrNow = database.vBuffer.allocate(vSz);
         database.fillBufferPointerFromSchema(database.vSchema, vBufferPtrNow, vSz, v);
         try {
             Util.checkErrorCode(JNI.mdb_cursor_put(cursor, kBufferPtrNow, vBufferPtrNow, 0));
         } finally {
-            Database.freeBufferPointer(database.vBufferPtr, vBufferPtrNow);
-            Database.freeBufferPointer(database.kBufferPtr, kBufferPtrNow);
+            database.vBuffer.free(vBufferPtrNow);
+            database.kBuffer.free(kBufferPtrNow);
             tx.generation++;
         }
     }
@@ -80,9 +80,9 @@ public class CursorWithDuplicateKeys<K, V> extends Cursor<K, V> implements AutoC
         final int kSz = bitsToBytes(database.kSchema.sizeBits(k));
         final int vSz = bitsToBytes(database.vSchema.sizeBits(v));
 
-        final long kBufferPtrNow = Database.allocateBufferPointer(database.kBufferPtr, kSz);
+        final long kBufferPtrNow = database.kBuffer.allocate(kSz);
         database.fillBufferPointerFromSchema(database.kSchema, kBufferPtrNow, kSz, k);
-        final long vBufferPtrNow = Database.allocateBufferPointer(database.vBufferPtr, vSz);
+        final long vBufferPtrNow = database.vBuffer.allocate(vSz);
         database.fillBufferPointerFromSchema(database.vSchema, vBufferPtrNow, vSz, v);
         try {
             final int rc = JNI.mdb_cursor_put(cursor, kBufferPtrNow, vBufferPtrNow, JNI.MDB_NODUPDATA);
@@ -93,8 +93,8 @@ public class CursorWithDuplicateKeys<K, V> extends Cursor<K, V> implements AutoC
                 return null;
             }
         } finally {
-            Database.freeBufferPointer(database.vBufferPtr, vBufferPtrNow);
-            Database.freeBufferPointer(database.kBufferPtr, kBufferPtrNow);
+            database.vBuffer.free(vBufferPtrNow);
+            database.kBuffer.free(kBufferPtrNow);
             tx.generation++;
         }
     }
@@ -109,14 +109,14 @@ public class CursorWithDuplicateKeys<K, V> extends Cursor<K, V> implements AutoC
 
         // See the comment in Cursor.put that explains why we have to "needlessly" copy the key from
         // bufferPtr into a fresh buffer for the call to mdb_cursor_put.
-        final long kBufferPtrNow = Database.allocateAndCopyBufferPointer(database.kBufferPtr, shared.bufferPtr);
-        final long vBufferPtrNow = Database.allocateBufferPointer(database.vBufferPtr, vSz);
+        final long kBufferPtrNow = database.kBuffer.allocateAndCopy(shared.bufferPtr);
+        final long vBufferPtrNow = database.vBuffer.allocate(vSz);
         database.fillBufferPointerFromSchema(database.vSchema, vBufferPtrNow, vSz, v);
         try {
             Util.checkErrorCode(JNI.mdb_cursor_put(cursor, kBufferPtrNow, vBufferPtrNow, 0));
         } finally {
-            Database.freeBufferPointer(database.vBufferPtr, vBufferPtrNow);
-            Database.freeBufferPointer(database.kBufferPtr, kBufferPtrNow);
+            database.vBuffer.free(vBufferPtrNow);
+            database.kBuffer.free(kBufferPtrNow);
             tx.generation++;
         }
     }

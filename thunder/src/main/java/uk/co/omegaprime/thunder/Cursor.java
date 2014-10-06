@@ -74,7 +74,7 @@ public class Cursor<K, V> implements Cursorlike<K,V>, AutoCloseable {
     private boolean move(K k, int op) {
         final int kSz = bitsToBytes(database.kSchema.sizeBits(k));
 
-        final long kBufferPtrNow = Database.allocateBufferPointer(database.kBufferPtr, kSz);
+        final long kBufferPtrNow = database.kBuffer.allocate(kSz);
         database.fillBufferPointerFromSchema(database.kSchema, kBufferPtrNow, kSz, k);
         try {
             return isFound(JNI.mdb_cursor_get(cursor, kBufferPtrNow, shared.bufferPtr + 2 * Unsafe.ADDRESS_SIZE, op));
@@ -83,7 +83,7 @@ public class Cursor<K, V> implements Cursorlike<K,V>, AutoCloseable {
             unsafe.putAddress(shared.bufferPtr,                       unsafe.getAddress(kBufferPtrNow));
             unsafe.putAddress(shared.bufferPtr + Unsafe.ADDRESS_SIZE, unsafe.getAddress(kBufferPtrNow + Unsafe.ADDRESS_SIZE));
             shared.bufferPtrGeneration = tx.generation;
-            Database.freeBufferPointer(database.kBufferPtr, kBufferPtrNow);
+            database.kBuffer.free(kBufferPtrNow);
         }
     }
 
@@ -95,18 +95,18 @@ public class Cursor<K, V> implements Cursorlike<K,V>, AutoCloseable {
     }
 
     protected boolean keyEquals(K k) {
-        return keyValueEquals(k, 0, database.kSchema, database.kBufferPtr, false);
+        return keyValueEquals(k, 0, database.kSchema, database.kBuffer, false);
     }
 
     protected boolean keyStartsWith(K k) {
-        return keyValueEquals(k, 0, database.kSchema, database.kBufferPtr, true);
+        return keyValueEquals(k, 0, database.kSchema, database.kBuffer, true);
     }
 
     protected boolean valueEquals(V v) {
-        return keyValueEquals(v, 2 * Unsafe.ADDRESS_SIZE, database.vSchema, database.vBufferPtr, false);
+        return keyValueEquals(v, 2 * Unsafe.ADDRESS_SIZE, database.vSchema, database.vBuffer, false);
     }
 
-    private <T> boolean keyValueEquals(T kv, int byteOffsetFromBufferPtr, Schema<T> schema, long scratchBufferPtr, boolean allowOurValueToBeAPrefix) {
+    private <T> boolean keyValueEquals(T kv, int byteOffsetFromBufferPtr, Schema<T> schema, SharedBuffer scratchBuffer, boolean allowOurValueToBeAPrefix) {
         refreshBufferPtr();
 
         final int szBits = schema.sizeBits(kv);
@@ -117,7 +117,7 @@ public class Cursor<K, V> implements Cursorlike<K,V>, AutoCloseable {
             return false;
         }
 
-        final long bufferPtrNow = Database.allocateBufferPointer(scratchBufferPtr, sz);
+        final long bufferPtrNow = scratchBuffer.allocate(sz);
         database.fillBufferPointerFromSchema(schema, bufferPtrNow, sz, kv);
         try {
             final long ourPtr   = unsafe.getAddress(shared.bufferPtr + byteOffsetFromBufferPtr + Unsafe.ADDRESS_SIZE);
@@ -139,7 +139,7 @@ public class Cursor<K, V> implements Cursorlike<K,V>, AutoCloseable {
 
             return true;
         } finally {
-            Database.freeBufferPointer(scratchBufferPtr, bufferPtrNow);
+            scratchBuffer.free(bufferPtrNow);
         }
     }
 
@@ -168,7 +168,7 @@ public class Cursor<K, V> implements Cursorlike<K,V>, AutoCloseable {
         // Reason: the pointers in bufferPtr generally come from mdb_get, and as the docs state "Values returned
         // from the database are valid only until a subsequent update operation, or the end of the transaction".
         // In particular I found that trying to use them as an *input* to an update operation causes DB corruption.
-        final long kBufferPtrNow = Database.allocateAndCopyBufferPointer(database.kBufferPtr, shared.bufferPtr);
+        final long kBufferPtrNow = database.kBuffer.allocateAndCopy(shared.bufferPtr);
         try {
             unsafe.putAddress(shared.bufferPtr + 2 * Unsafe.ADDRESS_SIZE, vSz);
             Util.checkErrorCode(JNI.mdb_cursor_put(cursor, kBufferPtrNow, shared.bufferPtr + 2 * Unsafe.ADDRESS_SIZE, JNI.MDB_CURRENT | JNI.MDB_RESERVE));
@@ -176,7 +176,7 @@ public class Cursor<K, V> implements Cursorlike<K,V>, AutoCloseable {
             database.vSchema.write(database.bs, v);
             database.bs.zeroFill();
         } finally {
-            Database.freeBufferPointer(database.kBufferPtr, kBufferPtrNow);
+            database.kBuffer.free(kBufferPtrNow);
             tx.generation++;
         }
     }
@@ -187,9 +187,9 @@ public class Cursor<K, V> implements Cursorlike<K,V>, AutoCloseable {
         final int kSz = bitsToBytes(database.kSchema.sizeBits(k));
         final int vSz = bitsToBytes(database.vSchema.sizeBits(v));
 
-        final long kBufferPtrNow = Database.allocateBufferPointer(database.kBufferPtr, kSz);
+        final long kBufferPtrNow = database.kBuffer.allocate(kSz);
         database.fillBufferPointerFromSchema(database.kSchema, kBufferPtrNow, kSz, k);
-        final long vBufferPtrNow = Database.allocateBufferPointer(database.vBufferPtr, vSz);
+        final long vBufferPtrNow = database.vBuffer.allocate(vSz);
         unsafe.putAddress(vBufferPtrNow, vSz);
         try {
             Util.checkErrorCode(JNI.mdb_cursor_put(cursor, kBufferPtrNow, vBufferPtrNow, JNI.MDB_RESERVE));
@@ -197,8 +197,8 @@ public class Cursor<K, V> implements Cursorlike<K,V>, AutoCloseable {
             database.vSchema.write(database.bs, v);
             database.bs.zeroFill();
         } finally {
-            Database.freeBufferPointer(database.vBufferPtr, vBufferPtrNow);
-            Database.freeBufferPointer(database.kBufferPtr, kBufferPtrNow);
+            database.vBuffer.free(vBufferPtrNow);
+            database.kBuffer.free(kBufferPtrNow);
             tx.generation++;
         }
     }
@@ -208,9 +208,9 @@ public class Cursor<K, V> implements Cursorlike<K,V>, AutoCloseable {
         final int kSz = bitsToBytes(database.kSchema.sizeBits(k));
         final int vSz = bitsToBytes(database.vSchema.sizeBits(v));
 
-        final long kBufferPtrNow = Database.allocateBufferPointer(database.kBufferPtr, kSz);
+        final long kBufferPtrNow = database.kBuffer.allocate(kSz);
         database.fillBufferPointerFromSchema(database.kSchema, kBufferPtrNow, kSz, k);
-        final long vBufferPtrNow = Database.allocateBufferPointer(database.vBufferPtr, vSz);
+        final long vBufferPtrNow = database.vBuffer.allocate(vSz);
         unsafe.putAddress(vBufferPtrNow, vSz);
         try {
             final int rc = JNI.mdb_cursor_put(cursor, kBufferPtrNow, vBufferPtrNow, JNI.MDB_RESERVE | JNI.MDB_NOOVERWRITE);
@@ -225,8 +225,8 @@ public class Cursor<K, V> implements Cursorlike<K,V>, AutoCloseable {
                 return null;
             }
         } finally {
-            Database.freeBufferPointer(database.vBufferPtr, vBufferPtrNow);
-            Database.freeBufferPointer(database.kBufferPtr, kBufferPtrNow);
+            database.vBuffer.free(vBufferPtrNow);
+            database.kBuffer.free(kBufferPtrNow);
             tx.generation++;
         }
     }

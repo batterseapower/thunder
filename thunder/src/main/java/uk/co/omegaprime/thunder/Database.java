@@ -16,7 +16,7 @@ public class Database<K, V> {
 
     // Used for temporary scratch storage within the context of a single method only, basically
     // just to save some calls to the allocator. The sole reason why Database is not thread safe.
-    final long kBufferPtr, vBufferPtr;
+    final SharedBuffer kBuffer, vBuffer;
     final BitStream bs = new BitStream();
 
     public Database(Environment db, long dbi, Schema<K> kSchema, Schema<V> vSchema) {
@@ -25,27 +25,12 @@ public class Database<K, V> {
         this.kSchema = kSchema;
         this.vSchema = vSchema;
 
-        this.kBufferPtr = allocateSharedBufferPointer(kSchema);
-        this.vBufferPtr = allocateSharedBufferPointer(vSchema);
+        this.kBuffer = new SharedBuffer(kSchema);
+        this.vBuffer = new SharedBuffer(vSchema);
     }
 
     public Schema<K> getKeySchema()   { return kSchema; }
     public Schema<V> getValueSchema() { return vSchema; }
-
-    private static <T> long allocateSharedBufferPointer(Schema<T> schema) {
-        if (schema.maximumSizeBits() < 0) {
-            // TODO: speculatively allocate a reasonable amount of memory that most allocations of interest might fit into?
-            return 0;
-        } else {
-            return allocateBufferPointer(0, bitsToBytes(schema.maximumSizeBits()));
-        }
-    }
-
-    private static void freeSharedBufferPointer(long bufferPtr) {
-        if (bufferPtr != 0) {
-            unsafe.freeMemory(bufferPtr);
-        }
-    }
 
     // INVARIANT: sz == schema.size(x)
     protected <T> void fillBufferPointerFromSchema(Schema<T> schema, long bufferPtr, int sz, T x) {
@@ -56,29 +41,6 @@ public class Database<K, V> {
         bs.zeroFill();
     }
 
-    protected static long allocateBufferPointer(long bufferPtr, int sz) {
-        if (bufferPtr != 0) {
-            return bufferPtr;
-        } else {
-            return unsafe.allocateMemory(2 * Unsafe.ADDRESS_SIZE + sz);
-        }
-    }
-
-    protected static long allocateAndCopyBufferPointer(long bufferPtr, long bufferPtrToCopy) {
-        int sz = (int)unsafe.getAddress(bufferPtrToCopy);
-        long bufferPtrNow = Database.allocateBufferPointer(bufferPtr, sz);
-        unsafe.putAddress(bufferPtrNow,                       sz);
-        unsafe.putAddress(bufferPtrNow + Unsafe.ADDRESS_SIZE, bufferPtr + 2 * Unsafe.ADDRESS_SIZE);
-        unsafe.copyMemory(unsafe.getAddress(bufferPtrToCopy + Unsafe.ADDRESS_SIZE), bufferPtr + 2 * Unsafe.ADDRESS_SIZE, sz);
-        return bufferPtrNow;
-    }
-
-    protected static void freeBufferPointer(long bufferPtr, long bufferPtrNow) {
-        if (bufferPtr == 0) {
-            unsafe.freeMemory(bufferPtrNow);
-        }
-    }
-
     public Cursor<K, V> createCursor(Transaction tx) {
         final long[] cursorPtr = new long[1];
         Util.checkErrorCode(JNI.mdb_cursor_open(tx.txn, dbi, cursorPtr));
@@ -87,8 +49,8 @@ public class Database<K, V> {
 
     @Override
     public void finalize() throws Throwable {
-        freeSharedBufferPointer(kBufferPtr);
-        freeSharedBufferPointer(vBufferPtr);
+        kBuffer.close();
+        vBuffer.close();
         super.finalize();
     }
 
@@ -96,9 +58,9 @@ public class Database<K, V> {
         final int kSz = bitsToBytes(kSchema.sizeBits(k));
         final int vSz = bitsToBytes(vSchema.sizeBits(v));
 
-        final long kBufferPtrNow = allocateBufferPointer(kBufferPtr, kSz);
+        final long kBufferPtrNow = kBuffer.allocate(kSz);
         fillBufferPointerFromSchema(kSchema, kBufferPtrNow, kSz, k);
-        final long vBufferPtrNow = allocateBufferPointer(vBufferPtr, vSz);
+        final long vBufferPtrNow = vBuffer.allocate(vSz);
         unsafe.putAddress(vBufferPtrNow, vSz);
         try {
             Util.checkErrorCode(JNI.mdb_put(tx.txn, dbi, kBufferPtrNow, vBufferPtrNow, JNI.MDB_RESERVE));
@@ -107,8 +69,8 @@ public class Database<K, V> {
             vSchema.write(bs, v);
             bs.zeroFill();
         } finally {
-            freeBufferPointer(vBufferPtr, vBufferPtrNow);
-            freeBufferPointer(kBufferPtr, kBufferPtrNow);
+            vBuffer.free(vBufferPtrNow);
+            kBuffer.free(kBufferPtrNow);
             tx.generation++;
         }
     }
@@ -117,9 +79,9 @@ public class Database<K, V> {
         final int kSz = bitsToBytes(kSchema.sizeBits(k));
         final int vSz = bitsToBytes(vSchema.sizeBits(v));
 
-        final long kBufferPtrNow = allocateBufferPointer(kBufferPtr, kSz);
+        final long kBufferPtrNow = kBuffer.allocate(kSz);
         fillBufferPointerFromSchema(kSchema, kBufferPtrNow, kSz, k);
-        final long vBufferPtrNow = allocateBufferPointer(vBufferPtr, vSz);
+        final long vBufferPtrNow = vBuffer.allocate(vSz);
         fillBufferPointerFromSchema(vSchema, vBufferPtrNow, vSz, v);
         try {
             int rc = JNI.mdb_put(tx.txn, dbi, kBufferPtrNow, vBufferPtrNow, JNI.MDB_RESERVE | JNI.MDB_NOOVERWRITE);
@@ -135,8 +97,8 @@ public class Database<K, V> {
                 return null;
             }
         } finally {
-            freeBufferPointer(vBufferPtr, vBufferPtrNow);
-            freeBufferPointer(kBufferPtr, kBufferPtrNow);
+            vBuffer.free(vBufferPtrNow);
+            kBuffer.free(kBufferPtrNow);
             tx.generation++;
         }
     }
@@ -144,7 +106,7 @@ public class Database<K, V> {
     public boolean remove(Transaction tx, K k) {
         final int kSz = bitsToBytes(kSchema.sizeBits(k));
 
-        final long kBufferPtrNow = allocateBufferPointer(kBufferPtr, kSz);
+        final long kBufferPtrNow = kBuffer.allocate(kSz);
         fillBufferPointerFromSchema(kSchema, kBufferPtrNow, kSz, k);
         try {
             int rc = JNI.mdb_del(tx.txn, dbi, kBufferPtrNow, 0);
@@ -155,7 +117,7 @@ public class Database<K, V> {
                 return true;
             }
         } finally {
-            freeBufferPointer(kBufferPtr, kBufferPtrNow);
+            kBuffer.free(kBufferPtrNow);
             tx.generation++;
         }
     }
@@ -163,9 +125,9 @@ public class Database<K, V> {
     public V get(Transaction tx, K k) {
         final int kSz = bitsToBytes(kSchema.sizeBits(k));
 
-        final long kBufferPtrNow = allocateBufferPointer(kBufferPtr, kSz);
+        final long kBufferPtrNow = kBuffer.allocate(kSz);
         fillBufferPointerFromSchema(kSchema, kBufferPtrNow, kSz, k);
-        final long vBufferPtrNow = allocateBufferPointer(vBufferPtr, 0);
+        final long vBufferPtrNow = vBuffer.allocate(0);
         try {
             int rc = JNI.mdb_get(tx.txn, dbi, kBufferPtrNow, vBufferPtrNow);
             if (rc == JNI.MDB_NOTFOUND) {
@@ -176,17 +138,17 @@ public class Database<K, V> {
                 return vSchema.read(bs);
             }
         } finally {
-            freeBufferPointer(vBufferPtr, vBufferPtrNow);
-            freeBufferPointer(kBufferPtr, kBufferPtrNow);
+            vBuffer.free(vBufferPtrNow);
+            kBuffer.free(kBufferPtrNow);
         }
     }
 
     public boolean contains(Transaction tx, K k) {
         final int kSz = bitsToBytes(kSchema.sizeBits(k));
 
-        final long kBufferPtrNow = allocateBufferPointer(kBufferPtr, kSz);
+        final long kBufferPtrNow = kBuffer.allocate(kSz);
         fillBufferPointerFromSchema(kSchema, kBufferPtrNow, kSz, k);
-        final long vBufferPtrNow = allocateBufferPointer(vBufferPtr, 0);
+        final long vBufferPtrNow = vBuffer.allocate(0);
         try {
             int rc = JNI.mdb_get(tx.txn, dbi, kBufferPtrNow, vBufferPtrNow);
             if (rc == JNI.MDB_NOTFOUND) {
@@ -196,8 +158,8 @@ public class Database<K, V> {
                 return true;
             }
         } finally {
-            freeBufferPointer(vBufferPtr, vBufferPtrNow);
-            freeBufferPointer(kBufferPtr, kBufferPtrNow);
+            vBuffer.free(vBufferPtrNow);
+            kBuffer.free(kBufferPtrNow);
         }
     }
 
