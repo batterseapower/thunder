@@ -7,114 +7,30 @@ import java.util.Iterator;
 import static uk.co.omegaprime.thunder.Bits.bitsToBytes;
 
 public class DatabaseWithDuplicateKeys<K, V> extends Database<K, V> {
-    public DatabaseWithDuplicateKeys(Environment db, long dbi, Schema<K> kSchema, Schema<V> vSchema) {
-        super(db, dbi, kSchema, vSchema);
+    private final UntypedDatabaseWithDuplicateKeys udb;
+
+    public DatabaseWithDuplicateKeys(UntypedDatabaseWithDuplicateKeys udb, Schema<K> kSchema, Schema<V> vSchema) {
+        super(udb, kSchema, vSchema);
+        this.udb = udb;
     }
+
+    DatabaseWithDuplicateKeys(UntypedDatabaseWithDuplicateKeys udb, BufferedSchema<K> kBuffer, BufferedSchema<V> vBuffer) {
+        super(udb, kBuffer, vBuffer);
+        this.udb = udb;
+    }
+
+    @Override
+    public UntypedDatabaseWithDuplicateKeys getUntypedDatabase() { return udb; }
 
     public CursorWithDuplicateKeys<K, V> createCursor(Transaction tx) {
-        final long[] cursorPtr = new long[1];
-        Util.checkErrorCode(JNI.mdb_cursor_open(tx.txn, dbi, cursorPtr));
-        return new CursorWithDuplicateKeys<>(this, tx, cursorPtr[0]);
-    }
-
-    // Override the base class because MDB_RESERVE doesn't really make sense with MDB_DUPSORT
-    @Override
-    public void put(Transaction tx, K k, V v) {
-        final int kSz = bitsToBytes(kSchema.sizeBits(k));
-        final int vSz = bitsToBytes(vSchema.sizeBits(v));
-
-        final long kBufferPtrNow = kBuffer.allocate(kSz);
-        fillBufferPointerFromSchema(kSchema, kBufferPtrNow, kSz, k);
-        final long vBufferPtrNow = vBuffer.allocate(vSz);
-        fillBufferPointerFromSchema(vSchema, vBufferPtrNow, vSz, v);
-        try {
-            Util.checkErrorCode(JNI.mdb_put(tx.txn, dbi, kBufferPtrNow, vBufferPtrNow, 0));
-        } finally {
-            vBuffer.free(vBufferPtrNow);
-            kBuffer.free(kBufferPtrNow);
-            tx.generation++;
-        }
-    }
-
-    // Override because MDB_RESERVE doesn't work, and need to use MDB_NODUPDATA rather than MDB_NOOVERWRITE
-    @Override
-    public V putIfAbsent(Transaction tx, K k, V v) {
-        final int kSz = bitsToBytes(kSchema.sizeBits(k));
-        final int vSz = bitsToBytes(vSchema.sizeBits(v));
-
-        final long kBufferPtrNow = kBuffer.allocate(kSz);
-        fillBufferPointerFromSchema(kSchema, kBufferPtrNow, kSz, k);
-        final long vBufferPtrNow = vBuffer.allocate(vSz);
-        fillBufferPointerFromSchema(vSchema, vBufferPtrNow, vSz, v);
-        try {
-            final int rc = JNI.mdb_put(tx.txn, dbi, kBufferPtrNow, vBufferPtrNow, JNI.MDB_NODUPDATA);
-            if (rc == JNI.MDB_KEYEXIST) {
-                return v;
-            } else {
-                Util.checkErrorCode(rc);
-                return null;
-            }
-        } finally {
-            vBuffer.free(vBufferPtrNow);
-            kBuffer.free(kBufferPtrNow);
-            tx.generation++;
-        }
+        return new CursorWithDuplicateKeys<>(this, udb.createCursor(tx));
     }
 
     public boolean remove(Transaction tx, K k, V v) {
-        final int kSz = bitsToBytes(kSchema.sizeBits(k));
-        final int vSz = bitsToBytes(vSchema.sizeBits(v));
-
-        final long kBufferPtrNow = kBuffer.allocate(kSz);
-        fillBufferPointerFromSchema(kSchema, kBufferPtrNow, kSz, k);
-        final long vBufferPtrNow = vBuffer.allocate(vSz);
-        fillBufferPointerFromSchema(vSchema, vBufferPtrNow, vSz, v);
-        try {
-            int rc = JNI.mdb_del(tx.txn, dbi, kBufferPtrNow, vBufferPtrNow);
-            if (rc == JNI.MDB_NOTFOUND) {
-                return false;
-            } else {
-                Util.checkErrorCode(rc);
-                return true;
-            }
-        } finally {
-            vBuffer.free(vBufferPtrNow);
-            kBuffer.free(kBufferPtrNow);
-            tx.generation++;
-        }
+        return udb.remove(tx, kBuffer, vBuffer, k, v);
     }
 
     public boolean contains(Transaction tx, K k, V v) {
-        // Unfortunately when using MDB_DUPSORT mdb_get ignores the data parameter and just
-        // returns the first value associated with a key.
-        try (CursorWithDuplicateKeys<K, V> cursor = createCursor(tx)) {
-            return cursor.moveTo(k, v);
-        }
-    }
-
-    // Override the base class so that we don't get duplicate keys in the iterator
-    @Override
-    public Iterator<K> keys(Transaction tx) {
-        final CursorWithDuplicateKeys<K, V> cursor = createCursor(tx);
-        final boolean initialHasNext = cursor.moveFirst();
-        return new Iterator<K>() {
-            boolean hasNext = initialHasNext;
-
-            public boolean hasNext() {
-                return hasNext;
-            }
-
-            @Override
-            public K next() {
-                if (!hasNext) throw new IllegalStateException("No more elements");
-
-                final K key = cursor.getKey();
-                hasNext = cursor.moveFirstOfNextKey();
-                if (!hasNext) {
-                    cursor.close();
-                }
-                return key;
-            }
-        };
+        return udb.contains(tx, kBuffer, vBuffer,  k, v);
     }
 }

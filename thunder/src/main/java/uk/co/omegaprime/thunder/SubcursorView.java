@@ -67,10 +67,11 @@ public class SubcursorView<K1, K2, V> implements Cursorlike<K2, V> {
         final int k1Sz = bitsToBytes(k1Schema.sizeBits(k1));
         final long aBufferPtrNow = database.kBuffer.allocate(k1Sz);
         try {
-            database.bs.initialize(aBufferPtrNow + 2 * Unsafe.ADDRESS_SIZE, k1Sz);
-            final long mark = database.bs.mark();
-            k1Schema.write(database.bs, k1);
-            k1IsMaximum = database.bs.incrementBitStreamFromMark(mark);
+            final BitStream bs = database.kBuffer.bs;
+            bs.initialize(aBufferPtrNow + 2 * Unsafe.ADDRESS_SIZE, k1Sz);
+            final long mark = bs.mark();
+            k1Schema.write(bs, k1);
+            k1IsMaximum = bs.incrementBitStreamFromMark(mark);
         } finally {
             database.kBuffer.free(aBufferPtrNow);
         }

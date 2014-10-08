@@ -38,7 +38,7 @@ public class Environment implements AutoCloseable {
     public <K, V> Database<K, V> database(Transaction tx, String name, Schema<K> kSchema, Schema<V> vSchema, boolean allowCreation) {
         final long[] dbiPtr = new long[1];
         Util.checkErrorCode(JNI.mdb_dbi_open(tx.txn, name, allowCreation ? JNI.MDB_CREATE : 0, dbiPtr));
-        return new Database<>(this, dbiPtr[0], kSchema, vSchema);
+        return new Database<>(new UntypedDatabase(this, dbiPtr[0]), kSchema, vSchema);
     }
 
     public <K, V> DatabaseWithDuplicateKeys<K, V> databaseWithDuplicateKeys(Transaction tx, String name, Schema<K> kSchema, Schema<V> vSchema) {
@@ -50,7 +50,7 @@ public class Environment implements AutoCloseable {
     public <K, V> DatabaseWithDuplicateKeys<K, V> databaseWithDuplicateKeys(Transaction tx, String name, Schema<K> kSchema, Schema<V> vSchema, boolean allowCreation) {
         final long[] dbiPtr = new long[1];
         Util.checkErrorCode(JNI.mdb_dbi_open(tx.txn, name, JNI.MDB_DUPSORT | (allowCreation ? JNI.MDB_CREATE : 0), dbiPtr));
-        return new DatabaseWithDuplicateKeys<>(this, dbiPtr[0], kSchema, vSchema);
+        return new DatabaseWithDuplicateKeys<>(new UntypedDatabaseWithDuplicateKeys(this, dbiPtr[0]), kSchema, vSchema);
     }
 
     // Quoth the docs:
